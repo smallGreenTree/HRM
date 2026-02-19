@@ -17,7 +17,10 @@ import coolname
 import hydra
 import pydantic
 from omegaconf import DictConfig
-from adam_atan2 import AdamATan2
+try:
+    from adam_atan2 import AdamATan2  # type: ignore
+except Exception:  # pragma: no cover - fallback if extension fails to load
+    AdamATan2 = None  # type: ignore
 
 from puzzle_dataset import PuzzleDataset, PuzzleDatasetConfig, PuzzleDatasetMetadata
 from utils.functions import load_model_class, get_model_source_path
@@ -145,6 +148,12 @@ def create_model(config: PretrainConfig, train_metadata: PuzzleDatasetMetadata, 
                     dist.broadcast(param, src=0)
 
     # Optimizers and lr
+    if AdamATan2 is None:
+        print("[WARN] adam-atan2 backend not available. Falling back to torch.optim.AdamW.")
+        adam_cls = torch.optim.AdamW
+    else:
+        adam_cls = AdamATan2
+
     optimizers = [
         CastedSparseEmbeddingSignSGD_Distributed(
             model.model.puzzle_emb.buffers(),  # type: ignore
@@ -154,7 +163,7 @@ def create_model(config: PretrainConfig, train_metadata: PuzzleDatasetMetadata, 
 
             world_size=world_size
         ),
-        AdamATan2(
+        adam_cls(
             model.parameters(),
 
             lr=0,  # Needs to be set by scheduler
