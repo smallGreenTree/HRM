@@ -3,7 +3,11 @@ from typing import Union
 import torch
 from torch import nn
 import torch.distributed as dist
-from torch.optim.optimizer import Optimizer, ParamsT
+from torch.optim.optimizer import Optimizer
+try:
+    from torch.optim.optimizer import ParamsT  # type: ignore
+except Exception:  # pragma: no cover - older torch
+    from typing import Any as ParamsT  # type: ignore
 
 from models.common import trunc_normal_init_
 
