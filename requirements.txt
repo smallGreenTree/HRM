@@ -9,3 +9,9 @@ wandb
 omegaconf
 hydra-core
 huggingface_hub
+filelock>=3.12
+packaging
+setuptools
+setuptools-scm
+wheel
+ninja
