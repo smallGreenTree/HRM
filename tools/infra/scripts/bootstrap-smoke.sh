@@ -42,11 +42,18 @@ fi
 git checkout "$BRANCH"
 git pull --ff-only || true
 
+echo "Installing build deps..."
+apt-get update -y
+apt-get install -y build-essential python3-dev ninja-build
+
 echo "Installing Python deps..."
 pip install -U pip
+pip install packaging wheel setuptools setuptools-scm
 pip install -r requirements.txt
 
 echo "Installing FlashAttention..."
+export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.6}"
+export MAX_JOBS="${MAX_JOBS:-4}"
 pip install flash-attn --no-build-isolation
 
 echo "Checking CUDA + PyTorch..."
