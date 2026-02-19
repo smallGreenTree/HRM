@@ -1,5 +1,6 @@
 from typing import Optional, Any, Sequence, List
 from dataclasses import dataclass
+import csv
 import os
 import math
 import yaml
@@ -36,6 +37,15 @@ class ArchConfig(pydantic.BaseModel):
     loss: LossConfig
 
 
+class InforidgeConfig(pydantic.BaseModel):
+    enabled: bool = False
+    max_batches: int = 1
+    include_H: bool = True
+    include_L: bool = True
+    log_wandb: bool = True
+    save_csv: bool = True
+
+
 class PretrainConfig(pydantic.BaseModel):
     # Config
     arch: ArchConfig
@@ -68,6 +78,7 @@ class PretrainConfig(pydantic.BaseModel):
     checkpoint_every_eval: bool = False
     eval_interval: Optional[int] = None
     eval_save_outputs: List[str] = []
+    inforidge: InforidgeConfig = InforidgeConfig()
 
 
 @dataclass
@@ -330,6 +341,93 @@ def evaluate(config: PretrainConfig, train_state: TrainState, eval_loader: torch
                 return reduced_metrics
 
 
+
+
+def run_inforidge_analysis(config: PretrainConfig, train_state: TrainState, eval_loader: torch.utils.data.DataLoader, rank: int):
+    if not config.inforidge.enabled or rank != 0:
+        return None
+
+    max_batches = max(1, config.inforidge.max_batches)
+    include_H = config.inforidge.include_H
+    include_L = config.inforidge.include_L
+
+    H_loss_sum = None
+    L_loss_sum = None
+    count_sum = 0
+    batches = 0
+
+    with torch.inference_mode():
+        for _set_name, batch, _global_batch_size in eval_loader:
+            if batches >= max_batches:
+                break
+            batches += 1
+
+            batch = {k: v.cuda() for k, v in batch.items()}
+            with torch.device("cuda"):
+                carry = train_state.model.initial_carry(batch)  # type: ignore
+
+            while True:
+                carry, _, _metrics, preds, all_finish = train_state.model(carry=carry, batch=batch, return_keys=["inforidge"])
+                if all_finish:
+                    break
+
+            info = preds.get("inforidge") if preds is not None else None
+            if info is None:
+                continue
+
+            count_sum += int(info["count"].cpu().item())
+            if include_H and info["H_loss_sum"] is not None:
+                H_loss_sum = info["H_loss_sum"].cpu() if H_loss_sum is None else H_loss_sum + info["H_loss_sum"].cpu()
+            if include_L and info["L_loss_sum"] is not None:
+                L_loss_sum = info["L_loss_sum"].cpu() if L_loss_sum is None else L_loss_sum + info["L_loss_sum"].cpu()
+
+    if count_sum == 0:
+        return None
+
+    results = {
+        "count": count_sum,
+        "H_loss_sum": H_loss_sum,
+        "L_loss_sum": L_loss_sum,
+    }
+    return results
+
+
+def log_inforidge_results(config: PretrainConfig, train_state: TrainState, results: dict):
+    if results is None:
+        return
+
+    count = results["count"]
+    H_loss_sum = results["H_loss_sum"]
+    L_loss_sum = results["L_loss_sum"]
+
+    rows = []
+    if H_loss_sum is not None:
+        H_nll = (H_loss_sum / count).tolist()
+        for i, nll in enumerate(H_nll):
+            rows.append(("H", i, float(nll), float(-nll)))
+    if L_loss_sum is not None:
+        L_nll = (L_loss_sum / count).tolist()
+        for i, nll in enumerate(L_nll):
+            rows.append(("L", i, float(nll), float(-nll)))
+
+    if config.inforidge.save_csv and config.checkpoint_path is not None:
+        os.makedirs(config.checkpoint_path, exist_ok=True)
+        csv_path = os.path.join(config.checkpoint_path, f"inforidge_step_{train_state.step}.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["layer_type", "layer_index", "nll", "info_proxy"])
+            writer.writerows(rows)
+
+    if config.inforidge.log_wandb and wandb.run is not None:
+        for layer_type, layer_index, nll, info in rows:
+            wandb.log({
+                f"inforidge/{layer_type}/nll_layer_{layer_index}": nll,
+                f"inforidge/{layer_type}/info_layer_{layer_index}": info,
+            }, step=train_state.step)
+
+
+
+
 def save_code_and_config(config: PretrainConfig):
     if config.checkpoint_path is None or wandb.run is None:
         return
@@ -438,7 +536,13 @@ def launch(hydra_config: DictConfig):
 
         if RANK == 0 and metrics is not None:
             wandb.log(metrics, step=train_state.step)
-            
+
+        ############ Inforidge Analysis
+        if config.inforidge.enabled:
+            inforidge_results = run_inforidge_analysis(config, train_state, eval_loader, rank=RANK)
+            if RANK == 0:
+                log_inforidge_results(config, train_state, inforidge_results)
+
         ############ Checkpointing
         if RANK == 0 and (config.checkpoint_every_eval or (_iter_id == total_iters - 1)):
             save_train_state(config, train_state)

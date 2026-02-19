@@ -29,3 +29,12 @@ puzzle_emb_weight_decay: 0.1
 
 # Hyperparams - Puzzle embeddings training
 puzzle_emb_lr: 1e-2
+
+# Inforidge (layer-wise information proxy)
+inforidge:
+  enabled: false
+  max_batches: 1
+  include_H: true
+  include_L: true
+  log_wandb: true
+  save_csv: true

@@ -54,7 +54,8 @@ class ACTLossHead(nn.Module):
     ) -> Tuple[Any, torch.Tensor, Dict[str, torch.Tensor], Optional[Dict[str, torch.Tensor]], torch.Tensor]:
         # Model logits
         # B x SeqLen x D
-        new_carry, outputs = self.model(**model_kwargs)
+        return_inforidge = "inforidge" in return_keys
+        new_carry, outputs = self.model(**model_kwargs, return_layer_states=return_inforidge)
         labels = new_carry.current_data["labels"]
 
         # Correctness
@@ -97,5 +98,32 @@ class ACTLossHead(nn.Module):
 
         # Filter outputs for return
         detached_outputs = {k: outputs[k].detach() for k in return_keys if k in outputs}
+
+        if return_inforidge:
+            layer_states_H = outputs.pop("layer_states_H", None)
+            layer_states_L = outputs.pop("layer_states_L", None)
+            with torch.no_grad():
+                valid_mask = labels != IGNORE_LABEL_ID
+                token_count = valid_mask.sum()
+                if token_count == 0:
+                    token_count = torch.tensor(1, device=labels.device)
+
+                def _layer_loss_sums(layer_states):
+                    if layer_states is None:
+                        return None
+                    loss_sums = []
+                    for state in layer_states:
+                        logits = self.model.inner.lm_head(state)[:, self.model.inner.puzzle_emb_len:]
+                        token_loss = self.loss_fn(logits, labels, ignore_index=IGNORE_LABEL_ID)
+                        loss_sums.append(token_loss.sum())
+                    return torch.stack(loss_sums)
+
+                inforidge_payload = {
+                    "count": token_count.detach(),
+                    "H_loss_sum": _layer_loss_sums(layer_states_H),
+                    "L_loss_sum": _layer_loss_sums(layer_states_L),
+                }
+
+            detached_outputs["inforidge"] = {k: (v.detach() if torch.is_tensor(v) else v) for k, v in inforidge_payload.items()}
 
         return new_carry, lm_loss + 0.5 * (q_halt_loss + q_continue_loss), metrics, detached_outputs, new_carry.halted.all()

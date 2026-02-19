@@ -89,14 +89,22 @@ class HierarchicalReasoningModel_ACTV1ReasoningModule(nn.Module):
 
         self.layers = torch.nn.ModuleList(layers)
 
-    def forward(self, hidden_states: torch.Tensor, input_injection: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, input_injection: torch.Tensor, collect: bool = False, **kwargs):
         # Input injection (add)
         hidden_states = hidden_states + input_injection
         # Layers
+        if not collect:
+            for layer in self.layers:
+                hidden_states = layer(hidden_states=hidden_states, **kwargs)
+
+            return hidden_states
+
+        layer_states = []
         for layer in self.layers:
             hidden_states = layer(hidden_states=hidden_states, **kwargs)
+            layer_states.append(hidden_states)
 
-        return hidden_states
+        return hidden_states, layer_states
 
 
 class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
@@ -177,7 +185,7 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
             z_L=torch.where(reset_flag.view(-1, 1, 1), self.L_init, carry.z_L),
         )
 
-    def forward(self, carry: HierarchicalReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor]) -> Tuple[HierarchicalReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(self, carry: HierarchicalReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor], return_layer_states: bool = False) -> Tuple[HierarchicalReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor], Optional[Dict[str, List[torch.Tensor]]]]:
         seq_info = dict(
             cos_sin=self.rotary_emb() if hasattr(self, "rotary_emb") else None,
         )
@@ -200,8 +208,17 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
         assert not z_H.requires_grad and not z_L.requires_grad
 
         # 1-step grad
-        z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
-        z_H = self.H_level(z_H, z_L, **seq_info)
+        layer_states = None
+        if return_layer_states:
+            z_L, z_L_layers = self.L_level(z_L, z_H + input_embeddings, collect=True, **seq_info)
+            z_H, z_H_layers = self.H_level(z_H, z_L, collect=True, **seq_info)
+            layer_states = {
+                "L": [x.detach() for x in z_L_layers],
+                "H": [x.detach() for x in z_H_layers],
+            }
+        else:
+            z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
+            z_H = self.H_level(z_H, z_L, **seq_info)
 
         # LM Outputs
         new_carry = HierarchicalReasoningModel_ACTV1InnerCarry(z_H=z_H.detach(), z_L=z_L.detach())  # New carry no grad
@@ -210,7 +227,7 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
         # Q head
         q_logits = self.q_head(z_H[:, 0]).to(torch.float32)
         
-        return new_carry, output, (q_logits[..., 0], q_logits[..., 1])
+        return new_carry, output, (q_logits[..., 0], q_logits[..., 1]), layer_states
 
 
 class HierarchicalReasoningModel_ACTV1(nn.Module):
@@ -237,7 +254,7 @@ class HierarchicalReasoningModel_ACTV1(nn.Module):
             current_data={k: torch.empty_like(v) for k, v in batch.items()}
         )
         
-    def forward(self, carry: HierarchicalReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor]) -> Tuple[HierarchicalReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
+    def forward(self, carry: HierarchicalReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor], return_layer_states: bool = False) -> Tuple[HierarchicalReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
         # Update data, carry (removing halted sequences)
         new_inner_carry = self.inner.reset_carry(carry.halted, carry.inner_carry)
         
@@ -246,13 +263,16 @@ class HierarchicalReasoningModel_ACTV1(nn.Module):
         new_current_data = {k: torch.where(carry.halted.view((-1, ) + (1, ) * (batch[k].ndim - 1)), batch[k], v) for k, v in carry.current_data.items()}
 
         # Forward inner model
-        new_inner_carry, logits, (q_halt_logits, q_continue_logits) = self.inner(new_inner_carry, new_current_data)
+        new_inner_carry, logits, (q_halt_logits, q_continue_logits), layer_states = self.inner(new_inner_carry, new_current_data, return_layer_states=return_layer_states)
 
         outputs = {
             "logits": logits,
             "q_halt_logits": q_halt_logits,
             "q_continue_logits": q_continue_logits
         }
+        if layer_states is not None:
+            outputs["layer_states_H"] = layer_states["H"]
+            outputs["layer_states_L"] = layer_states["L"]
         
         with torch.no_grad():
             # Step
