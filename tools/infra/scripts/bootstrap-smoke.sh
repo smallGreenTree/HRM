@@ -46,6 +46,9 @@ echo "Installing Python deps..."
 pip install -U pip
 pip install -r requirements.txt
 
+echo "Installing FlashAttention..."
+pip install flash-attn --no-build-isolation
+
 echo "Checking CUDA + PyTorch..."
 python - <<'PY'
 import torch
