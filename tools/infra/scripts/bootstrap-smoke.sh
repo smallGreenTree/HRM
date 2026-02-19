@@ -12,7 +12,7 @@ set -euo pipefail
 #   workdir=/workspace/HRM
 
 REPO_URL="${1:-https://github.com/smallGreenTree/HRM.git}"
-BRANCH="${2:-exp}"
+BRANCH="${2:-inforidge}"
 WORKDIR="${3:-/workspace/HRM}"
 
 echo "=============================================="
