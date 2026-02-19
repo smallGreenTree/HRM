@@ -14,6 +14,11 @@ def trunc_normal_init_(tensor: torch.Tensor, std: float = 1.0, lower: float = -2
         if std == 0:
             tensor.zero_()
         else:
+            orig_tensor = tensor
+            orig_dtype = tensor.dtype
+            if orig_dtype in (torch.bfloat16, torch.float16):
+                tensor = tensor.float()
+
             sqrt2 = math.sqrt(2)
             a = math.erf(lower / sqrt2)
             b = math.erf(upper / sqrt2)
@@ -28,5 +33,8 @@ def trunc_normal_init_(tensor: torch.Tensor, std: float = 1.0, lower: float = -2
             tensor.erfinv_()
             tensor.mul_(sqrt2 * comp_std)
             tensor.clip_(lower * comp_std, upper * comp_std)
+            if tensor.dtype != orig_dtype:
+                orig_tensor.copy_(tensor.to(orig_dtype))
+                tensor = orig_tensor
 
     return tensor
