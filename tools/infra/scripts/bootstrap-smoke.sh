@@ -49,7 +49,11 @@ apt-get install -y build-essential python3-dev ninja-build
 echo "Installing Python deps..."
 pip install -U pip
 pip install packaging wheel setuptools setuptools-scm
-pip install -r requirements.txt
+if [ -f requirements-runpod.txt ]; then
+  pip install -r requirements-runpod.txt
+else
+  pip install -r requirements.txt
+fi
 
 
 echo "Checking CUDA + PyTorch..."
