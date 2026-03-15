@@ -17,9 +17,19 @@ epochs: 100000
 eval_interval: 10000
 checkpoint_every_eval: True
 
+# Optional naming / artifact paths
+project_name: null
+run_name: null
+checkpoint_path: null
+
 lr: 1e-4
 lr_min_ratio: 1.0
 lr_warmup_steps: 2000
+
+# Optional: load a trained checkpoint before running
+load_checkpoint_path: null
+# Optional: run only eval + InfoRidge (no training)
+analysis_only: false
 
 # Standard hyperparameter settings for LM, as used in Llama
 beta1: 0.9
@@ -30,11 +40,24 @@ puzzle_emb_weight_decay: 0.1
 # Hyperparams - Puzzle embeddings training
 puzzle_emb_lr: 1e-2
 
-# Inforidge (layer-wise information proxy)
-inforidge:
+# InfoRidge (layer-wise matrix-MI)
+inforidge_config:
   enabled: false
   max_batches: 1
+  max_tokens: 256
+  sample_mode: last_token
+  target_embedding_mode: lookup
+  normalize_vectors: true
+  kernel_sigma: 1.0
+  sample_seed: 0
   include_H: true
   include_L: true
+  log_wandb: true
+  save_csv: true
+
+# InfoRidge MI across ACT steps
+inforidge_act_mi:
+  enabled: false
+  max_batches: 1
   log_wandb: true
   save_csv: true

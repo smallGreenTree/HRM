@@ -8,11 +8,11 @@ set -euo pipefail
 #   ./bootstrap-smoke.sh [repo_url] [branch] [workdir]
 # Defaults:
 #   repo_url=https://github.com/smallGreenTree/HRM.git
-#   branch=exp
+#   branch=main
 #   workdir=/workspace/HRM
 
 REPO_URL="${1:-https://github.com/smallGreenTree/HRM.git}"
-BRANCH="${2:-inforidge}"
+BRANCH="${2:-main}"
 WORKDIR="${3:-/workspace/HRM}"
 
 echo "=============================================="
@@ -51,10 +51,6 @@ pip install -U pip
 pip install packaging wheel setuptools setuptools-scm
 pip install -r requirements.txt
 
-echo "Installing FlashAttention..."
-export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.6}"
-export MAX_JOBS="${MAX_JOBS:-4}"
-pip install flash-attn --no-build-isolation
 
 echo "Checking CUDA + PyTorch..."
 python - <<'PY'
@@ -65,15 +61,7 @@ if torch.cuda.is_available():
     print("cuda device:", torch.cuda.get_device_name(0))
 PY
 
-echo "Checking FlashAttention..."
-python - <<'PY'
-try:
-    from flash_attn import flash_attn_func  # noqa: F401
-    print("flash-attn: OK")
-except Exception as e:
-    print("flash-attn: missing or failed import:", e)
-    raise SystemExit(1)
-PY
+echo "Skipping FlashAttention install (using PyTorch SDPA fallback)."
 
 echo "Checking core imports..."
 python - <<'PY'

@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage: ./set-startup-smoke.sh [repo_url] [branch] [workdir]
 
 REPO_URL="${1:-https://github.com/smallGreenTree/HRM.git}"
-BRANCH="${2:-exp}"
+BRANCH="${2:-main}"
 WORKDIR="${3:-/workspace/HRM}"
 
 ENV_DIR="$(cd "$(dirname "$0")/../sandbox" && pwd)"

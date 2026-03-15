@@ -6,6 +6,7 @@ provider "registry.terraform.io/decentralized-infrastructure/runpod" {
   constraints = ">= 1.0.0"
   hashes = [
     "h1:2W/nTOff0G1qy5tXHhVYN+Va2amTjHuSIAHi8762KZ4=",
+    "h1:xmOyO67k+KbCY0LB4NF9uDub/o9VuImm259kaqAkoUE=",
     "zh:04828ac1b536dd54115a0b8784d6836d99abc5f542a8e18cbd2aea39c7cfe00a",
     "zh:1e804697a42f73c1bd91953ada1b26d8b3f30a1fdcd0ca77ccf5eca168033216",
     "zh:2604c521f3119b322592bf3b135a076eade2eb52ba8f9a8541dbd64e2da18f95",

@@ -185,7 +185,7 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
             z_L=torch.where(reset_flag.view(-1, 1, 1), self.L_init, carry.z_L),
         )
 
-    def forward(self, carry: HierarchicalReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor], return_layer_states: bool = False) -> Tuple[HierarchicalReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor], Optional[Dict[str, List[torch.Tensor]]]]:
+    def forward(self, carry: HierarchicalReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor], return_layer_states: bool = False, return_z: bool = False) -> Tuple[HierarchicalReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor], Optional[Dict[str, List[torch.Tensor]]], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         seq_info = dict(
             cos_sin=self.rotary_emb() if hasattr(self, "rotary_emb") else None,
         )
@@ -227,7 +227,8 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
         # Q head
         q_logits = self.q_head(z_H[:, 0]).to(torch.float32)
         
-        return new_carry, output, (q_logits[..., 0], q_logits[..., 1]), layer_states
+        z_pair = (z_H.detach(), z_L.detach()) if return_z else None
+        return new_carry, output, (q_logits[..., 0], q_logits[..., 1]), layer_states, z_pair
 
 
 class HierarchicalReasoningModel_ACTV1(nn.Module):
@@ -254,7 +255,7 @@ class HierarchicalReasoningModel_ACTV1(nn.Module):
             current_data={k: torch.empty_like(v) for k, v in batch.items()}
         )
         
-    def forward(self, carry: HierarchicalReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor], return_layer_states: bool = False) -> Tuple[HierarchicalReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
+    def forward(self, carry: HierarchicalReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor], return_layer_states: bool = False, return_z: bool = False) -> Tuple[HierarchicalReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
         # Update data, carry (removing halted sequences)
         new_inner_carry = self.inner.reset_carry(carry.halted, carry.inner_carry)
         
@@ -263,7 +264,7 @@ class HierarchicalReasoningModel_ACTV1(nn.Module):
         new_current_data = {k: torch.where(carry.halted.view((-1, ) + (1, ) * (batch[k].ndim - 1)), batch[k], v) for k, v in carry.current_data.items()}
 
         # Forward inner model
-        new_inner_carry, logits, (q_halt_logits, q_continue_logits), layer_states = self.inner(new_inner_carry, new_current_data, return_layer_states=return_layer_states)
+        new_inner_carry, logits, (q_halt_logits, q_continue_logits), layer_states, z_pair = self.inner(new_inner_carry, new_current_data, return_layer_states=return_layer_states, return_z=return_z)
 
         outputs = {
             "logits": logits,
@@ -273,6 +274,9 @@ class HierarchicalReasoningModel_ACTV1(nn.Module):
         if layer_states is not None:
             outputs["layer_states_H"] = layer_states["H"]
             outputs["layer_states_L"] = layer_states["L"]
+        if z_pair is not None:
+            outputs["z_H"] = z_pair[0]
+            outputs["z_L"] = z_pair[1]
         
         with torch.no_grad():
             # Step
@@ -296,7 +300,7 @@ class HierarchicalReasoningModel_ACTV1(nn.Module):
                 # NOTE: No replay buffer and target networks for computing target Q-value.
                 # As batch_size is large, there're many parallel envs.
                 # Similar concept as PQN https://arxiv.org/abs/2407.04811
-                next_q_halt_logits, next_q_continue_logits = self.inner(new_inner_carry, new_current_data)[-1]
+                next_q_halt_logits, next_q_continue_logits = self.inner(new_inner_carry, new_current_data)[2]
                 
                 outputs["target_q_continue"] = torch.sigmoid(torch.where(is_last_step, next_q_halt_logits, torch.maximum(next_q_halt_logits, next_q_continue_logits)))
 

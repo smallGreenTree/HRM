@@ -1,7 +1,7 @@
 {
   "version": 4,
   "terraform_version": "1.5.7",
-  "serial": 72,
+  "serial": 61,
   "lineage": "48ef1c1b-bd3f-8b73-c9df-358bb69b6a79",
   "outputs": {
     "gpu_info": {
@@ -18,11 +18,11 @@
       ]
     },
     "pod_hostname": {
-      "value": "jzrsjt3frkib",
+      "value": "ds722zlr8wse",
       "type": "string"
     },
     "pod_id": {
-      "value": "uukb3jclmp4g3i",
+      "value": "yzft5n8xjgj2h1",
       "type": "string"
     },
     "pod_name": {
@@ -72,13 +72,13 @@
               "NVIDIA RTX A4000"
             ],
             "gpu_type_priority": "availability",
-            "id": "uukb3jclmp4g3i",
+            "id": "yzft5n8xjgj2h1",
             "image_name": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
             "interruptible": false,
-            "last_started_at": "2026-03-15 17:12:14.035 +0000 UTC",
+            "last_started_at": "2026-02-19 20:12:15.782 +0000 UTC",
             "locked": false,
-            "machine_id": "jzrsjt3frkib",
-            "memory_in_gb": 62,
+            "machine_id": "ds722zlr8wse",
+            "memory_in_gb": 30,
             "min_disk_bandwidth_mbps": null,
             "min_download_mbps": null,
             "min_ram_per_gpu": 8,
