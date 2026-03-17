@@ -206,55 +206,96 @@ def run_inforidge_act_mi(
     if not config.inforidge_act_mi.enabled or rank != 0:
         return None
 
-    fixed_batch = None
-    for _set_name, batch, _global_batch_size in eval_loader:
-        fixed_batch = batch
-        break
-
-    if fixed_batch is None:
-        return None
+    max_batches = max(1, config.inforidge_act_mi.max_batches)
 
     with torch.inference_mode():
-        batch = {k: v.cuda() for k, v in fixed_batch.items()}
-        with torch.device("cuda"):
-            carry = train_state.model.initial_carry(batch)  # type: ignore
-
-        zh_steps = []
-        labels = batch["labels"]
         model_core = train_state.model.model  # type: ignore[attr-defined]
         model_inner = model_core.inner
         prefix_len = getattr(model_inner, "prefix_len", getattr(model_inner, "puzzle_emb_len", 0))
         embed_tokens = model_inner.embed_tokens
+        predictive_sums: list[torch.Tensor] = []
+        incremental_sums: list[torch.Tensor] = []
+        sample_weights: list[int] = []
+        batches = 0
 
-        while True:
-            carry, outputs = model_core(
-                carry=carry,
-                batch=batch,
-                return_z=True,
-            )
-            z_h = outputs.get("z_H")
-            if z_h is None:
-                return None
-            zh_steps.append(z_h.detach())
-            if bool(carry.halted.all().item()):
+        for _set_name, fixed_batch, _global_batch_size in eval_loader:
+            if batches >= max_batches:
                 break
+            batches += 1
 
-        y = _pool_label_emb(labels, embed_tokens, prefix_len)
-        y = l2_normalize(y)
+            batch = {k: v.cuda() for k, v in fixed_batch.items()}
+            with torch.device("cuda"):
+                carry = train_state.model.initial_carry(batch)  # type: ignore
+
+            zh_steps = []
+            labels = batch["labels"]
+
+            while True:
+                carry, outputs = model_core(
+                    carry=carry,
+                    batch=batch,
+                    return_z=True,
+                )
+                z_h = outputs.get("z_H")
+                if z_h is None:
+                    return None
+                zh_steps.append(z_h.detach())
+                if bool(carry.halted.all().item()):
+                    break
+
+            y = _pool_label_emb(labels, embed_tokens, prefix_len)
+            y = l2_normalize(y)
+
+            prev = None
+            current_predictive: list[torch.Tensor] = []
+            current_incremental: list[torch.Tensor] = []
+            current_weight = 0
+
+            for z in zh_steps:
+                z_pooled = _pool_valid(z, labels, prefix_len)
+                z_pooled = l2_normalize(z_pooled)
+                current_weight = int(z_pooled.shape[0])
+
+                mi = matrix_mutual_information(z_pooled, y).detach().cpu()
+                current_predictive.append(mi)
+
+                if prev is None:
+                    current_incremental.append(torch.tensor(float("nan"), dtype=torch.float64))
+                else:
+                    dz = z_pooled - prev
+                    dz = l2_normalize(dz)
+                    dmi = matrix_mutual_information(dz, y).detach().cpu()
+                    current_incremental.append(dmi)
+                prev = z_pooled
+
+            if current_weight == 0:
+                continue
+
+            if not predictive_sums:
+                predictive_sums = [torch.zeros((), dtype=torch.float64) for _ in current_predictive]
+                incremental_sums = [torch.zeros((), dtype=torch.float64) for _ in current_incremental]
+                sample_weights = [0 for _ in current_predictive]
+
+            for idx, mi in enumerate(current_predictive):
+                predictive_sums[idx] += mi * current_weight
+                sample_weights[idx] += current_weight
+
+            for idx, dmi in enumerate(current_incremental):
+                if not torch.isnan(dmi):
+                    incremental_sums[idx] += dmi * current_weight
+
+        if not predictive_sums:
+            return None
 
         results = []
-        prev = None
-        for step_idx, z in enumerate(zh_steps, start=1):
-            z_pooled = _pool_valid(z, labels, prefix_len)
-            z_pooled = l2_normalize(z_pooled)
-            mi = matrix_mutual_information(z_pooled, y).detach().cpu().item()
-            if prev is None:
+        for step_idx, (mi_sum, dmi_sum, weight) in enumerate(zip(predictive_sums, incremental_sums, sample_weights), start=1):
+            if weight == 0:
+                continue
+            mi = (mi_sum / weight).item()
+            if step_idx == 1:
                 dmi = None
             else:
-                dz = z_pooled - prev
-                dz = l2_normalize(dz)
-                dmi = matrix_mutual_information(dz, y).detach().cpu().item()
-            prev = z_pooled
+                dmi = (dmi_sum / weight).item()
             results.append((step_idx, mi, dmi))
 
     return results
