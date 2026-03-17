@@ -5,6 +5,7 @@ import math
 import csv
 import yaml
 import shutil
+import random
 
 import torch
 import torch.distributed as dist
@@ -96,6 +97,7 @@ class TrainState:
     carry: Any
     step: int
     total_steps: int
+    completed_iters: int
 
 
 def create_dataloader(config: PretrainConfig, split: str, rank: int, world_size: int, **kwargs):
@@ -202,6 +204,7 @@ def init_train_state(config: PretrainConfig, train_metadata: PuzzleDatasetMetada
     return TrainState(
         step=0,
         total_steps=total_steps,
+        completed_iters=0,
 
         model=model,
         optimizers=optimizers,
@@ -210,21 +213,85 @@ def init_train_state(config: PretrainConfig, train_metadata: PuzzleDatasetMetada
     )
 
 
+def _checkpoint_path(base_dir: str, step: int) -> str:
+    return os.path.join(base_dir, f"step_{step}.pt")
+
+
+def _get_rng_state() -> dict[str, Any]:
+    state: dict[str, Any] = {
+        "python": random.getstate(),
+        "torch": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def _set_rng_state(state: dict[str, Any]):
+    if "python" in state:
+        random.setstate(state["python"])
+    if "torch" in state:
+        torch.set_rng_state(state["torch"])
+    if "cuda" in state and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(state["cuda"])
+
+
 def save_train_state(config: PretrainConfig, train_state: TrainState):
-    # FIXME: Only saved model.
     if config.checkpoint_path is None:
         return
 
     os.makedirs(config.checkpoint_path, exist_ok=True)
-    torch.save(train_state.model.state_dict(), os.path.join(config.checkpoint_path, f"step_{train_state.step}"))
+    checkpoint = {
+        "format_version": 2,
+        "model_state_dict": train_state.model.state_dict(),
+        "optimizer_state_dicts": [optim.state_dict() for optim in train_state.optimizers],
+        "optimizer_lrs": list(train_state.optimizer_lrs),
+        "step": train_state.step,
+        "total_steps": train_state.total_steps,
+        "completed_iters": train_state.completed_iters,
+        "rng_state": _get_rng_state(),
+    }
+    torch.save(checkpoint, _checkpoint_path(config.checkpoint_path, train_state.step))
 
 
 def maybe_load_train_state(config: PretrainConfig, train_state: TrainState):
     if config.load_checkpoint_path is None:
         return
-    state_dict = torch.load(config.load_checkpoint_path, map_location="cpu")
-    train_state.model.load_state_dict(state_dict)
-    print(f"[INFO] Loaded model checkpoint from {config.load_checkpoint_path}")
+    checkpoint = torch.load(config.load_checkpoint_path, map_location="cpu")
+
+    if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+        train_state.model.load_state_dict(checkpoint["model_state_dict"])
+
+        optimizer_state_dicts = checkpoint.get("optimizer_state_dicts")
+        if optimizer_state_dicts is not None:
+            for optim, optim_state in zip(train_state.optimizers, optimizer_state_dicts):
+                optim.load_state_dict(optim_state)
+
+        optimizer_lrs = checkpoint.get("optimizer_lrs")
+        if optimizer_lrs is not None:
+            train_state.optimizer_lrs = optimizer_lrs
+
+        train_state.step = int(checkpoint.get("step", train_state.step))
+        train_state.total_steps = int(checkpoint.get("total_steps", train_state.total_steps))
+        train_state.completed_iters = int(checkpoint.get("completed_iters", 0))
+
+        rng_state = checkpoint.get("rng_state")
+        if rng_state is not None:
+            _set_rng_state(rng_state)
+
+        print(
+            f"[INFO] Loaded full checkpoint from {config.load_checkpoint_path} "
+            f"(step={train_state.step}, completed_iters={train_state.completed_iters})"
+        )
+        return
+
+    train_state.model.load_state_dict(checkpoint)
+    train_state.step = 0
+    train_state.completed_iters = 0
+    print(
+        f"[INFO] Loaded model-only checkpoint from {config.load_checkpoint_path}. "
+        "Optimizer state and step were not restored."
+    )
 
 
 def compute_lr(base_lr: float, config: PretrainConfig, train_state: TrainState):
@@ -494,6 +561,7 @@ def launch(hydra_config: DictConfig):
     progress_bar = None
     if RANK == 0:
         progress_bar = tqdm.tqdm(total=train_state.total_steps)
+        progress_bar.update(train_state.step)
 
         wandb.init(project=config.project_name, name=config.run_name, config=config.model_dump(), settings=wandb.Settings(_disable_stats=True))  # type: ignore
         wandb.log({"num_params": sum(x.numel() for x in train_state.model.parameters())}, step=0)
@@ -521,7 +589,7 @@ def launch(hydra_config: DictConfig):
         return
 
     # Training Loop
-    for _iter_id in range(total_iters):
+    for _iter_id in range(train_state.completed_iters, total_iters):
         print (f"[Rank {RANK}, World Size {WORLD_SIZE}]: Epoch {_iter_id * train_epochs_per_iter}")
 
         ############ Train Iter
@@ -557,6 +625,7 @@ def launch(hydra_config: DictConfig):
 
         ############ Checkpointing
         if RANK == 0 and (config.checkpoint_every_eval or (_iter_id == total_iters - 1)):
+            train_state.completed_iters = _iter_id + 1
             save_train_state(config, train_state)
 
     # finalize

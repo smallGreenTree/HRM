@@ -108,6 +108,11 @@ python dataset/build_sudoku_dataset.py --output-dir data/sudoku-extreme-1k-aug-1
 
 # Maze
 python dataset/build_maze_dataset.py  # 1000 examples
+
+# Synthetic Arithmetic
+bash scripts/build_synthetic_arithmetic.sh  # Default K=5 train/test split
+# Optional distribution shift example:
+TEST_MODULUS=7 OUTPUT_DIR=data/synthetic-arithmetic-k5-k7 bash scripts/build_synthetic_arithmetic.sh
 ```
 
 ### Dataset Visualization
@@ -152,6 +157,14 @@ OMP_NUM_THREADS=8 torchrun --nproc-per-node 8 pretrain.py data_path=data/maze-30
 ```
 
 *Runtime:* ~1 hour
+
+Synthetic Arithmetic:
+
+```bash
+bash scripts/train_synthetic_runpod.sh
+```
+
+*Notes:* The builder creates `train` and `test` splits in the standard dataset format. The test split is what evaluation and InfoRidge use.
 
 ### Full Sudoku-Hard
 

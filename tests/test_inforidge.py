@@ -42,6 +42,16 @@ def _summary_stats(x: torch.Tensor) -> dict:
 
 
 class InfoRidgeMathTests(unittest.TestCase):
+    def test_matrix_mutual_information_upcasts_bfloat16_inputs(self):
+        torch.manual_seed(13)
+        u = torch.randn(32, 8, dtype=torch.bfloat16)
+        v = u + 0.05 * torch.randn(32, 8, dtype=torch.bfloat16)
+
+        mi = matrix_mutual_information(u, v, sigma=1.0)
+
+        self.assertEqual(mi.dtype, torch.float64)
+        self.assertTrue(torch.isfinite(mi).item())
+
     def test_matrix_mutual_information_tracks_alignment(self):
         torch.manual_seed(7)
         u = 3.7 * torch.randn(128, 8, dtype=torch.float64)

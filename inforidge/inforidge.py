@@ -17,6 +17,9 @@ def l2_normalize(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
 
 
 def gram_matrix(u: torch.Tensor, sigma: float = 1.0) -> torch.Tensor:
+    # Matrix entropy relies on eigendecomposition, which is not implemented for
+    # bfloat16 on CUDA. Upcast once here so all MI callers share the stable path.
+    u = u.to(torch.float64)
     diff = u.unsqueeze(1) - u.unsqueeze(0)
     dist2 = (diff * diff).sum(dim=-1)
     g = torch.exp(-dist2 / (2 * sigma * sigma))

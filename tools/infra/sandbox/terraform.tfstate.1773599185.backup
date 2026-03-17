@@ -1,12 +1,12 @@
 {
   "version": 4,
   "terraform_version": "1.5.7",
-  "serial": 86,
+  "serial": 72,
   "lineage": "48ef1c1b-bd3f-8b73-c9df-358bb69b6a79",
   "outputs": {
     "gpu_info": {
       "value": {
-        "count": 8,
+        "count": 1,
         "type": "NVIDIA RTX A4000"
       },
       "type": [
@@ -18,11 +18,11 @@
       ]
     },
     "pod_hostname": {
-      "value": "uvvek55v968o",
+      "value": "jzrsjt3frkib",
       "type": "string"
     },
     "pod_id": {
-      "value": "dkxhxof1c4xygv",
+      "value": "uukb3jclmp4g3i",
       "type": "string"
     },
     "pod_name": {
@@ -52,7 +52,7 @@
             "compute_type": "GPU",
             "container_disk_in_gb": 20,
             "container_registry_auth_id": null,
-            "cost_per_hr": 1.36,
+            "cost_per_hr": 0.17,
             "country_codes": null,
             "cpu_flavor_ids": null,
             "cpu_flavor_priority": "availability",
@@ -63,22 +63,22 @@
             "docker_start_cmd": [
               "/bin/bash",
               "-lc",
-              "apt-get update \u0026\u0026 apt-get install -y git \u0026\u0026 if [ -d /workspace/HRM/.git ]; then cd /workspace/HRM \u0026\u0026 git fetch --all --prune; else git clone https://github.com/smallGreenTree/HRM.git /workspace/HRM \u0026\u0026 cd /workspace/HRM; fi \u0026\u0026 git checkout -B inforidge origin/inforidge \u0026\u0026 git pull --ff-only || true \u0026\u0026 sleep infinity"
+              "apt-get update \u0026\u0026 apt-get install -y git \u0026\u0026 if [ -d /workspace/HRM/.git ]; then cd /workspace/HRM \u0026\u0026 git fetch --all --prune; else git clone https://github.com/smallGreenTree/HRM.git /workspace/HRM \u0026\u0026 cd /workspace/HRM; fi \u0026\u0026 if git show-ref --verify --quiet refs/remotes/origin/inforidge; then git checkout -B inforidge origin/inforidge; fi \u0026\u0026 git pull --ff-only || true \u0026\u0026 if [ -f tools/infra/scripts/bootstrap-smoke.sh ]; then bash tools/infra/scripts/bootstrap-smoke.sh; else echo 'bootstrap-smoke.sh not found'; fi"
             ],
             "env": {},
             "global_networking": false,
-            "gpu_count": 8,
+            "gpu_count": 1,
             "gpu_type_ids": [
               "NVIDIA RTX A4000"
             ],
             "gpu_type_priority": "availability",
-            "id": "dkxhxof1c4xygv",
+            "id": "uukb3jclmp4g3i",
             "image_name": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
             "interruptible": false,
-            "last_started_at": "2026-03-15 19:24:12.853 +0000 UTC",
+            "last_started_at": "2026-03-15 17:12:14.035 +0000 UTC",
             "locked": false,
-            "machine_id": "uvvek55v968o",
-            "memory_in_gb": 502,
+            "machine_id": "jzrsjt3frkib",
+            "memory_in_gb": 62,
             "min_disk_bandwidth_mbps": null,
             "min_download_mbps": null,
             "min_ram_per_gpu": 8,

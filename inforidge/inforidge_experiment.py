@@ -221,19 +221,22 @@ def run_inforidge_act_mi(
 
         zh_steps = []
         labels = batch["labels"]
-        prefix_len = getattr(train_state.model.model.inner, "prefix_len", getattr(train_state.model.model.inner, "puzzle_emb_len", 0))  # type: ignore
-        embed_tokens = train_state.model.model.inner.embed_tokens  # type: ignore
+        model_core = train_state.model.model  # type: ignore[attr-defined]
+        model_inner = model_core.inner
+        prefix_len = getattr(model_inner, "prefix_len", getattr(model_inner, "puzzle_emb_len", 0))
+        embed_tokens = model_inner.embed_tokens
 
         while True:
-            carry, _, _metrics, preds, all_finish = train_state.model(
+            carry, outputs = model_core(
                 carry=carry,
                 batch=batch,
-                return_keys=["inforidge_act_mi"],
+                return_z=True,
             )
-            if preds is None or "inforidge_act_mi" not in preds:
+            z_h = outputs.get("z_H")
+            if z_h is None:
                 return None
-            zh_steps.append(preds["inforidge_act_mi"]["z_H"])
-            if all_finish:
+            zh_steps.append(z_h.detach())
+            if bool(carry.halted.all().item()):
                 break
 
         y = _pool_label_emb(labels, embed_tokens, prefix_len)

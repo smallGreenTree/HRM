@@ -28,7 +28,7 @@ public_ip = true
 startup_command = [
   "/bin/bash",
   "-lc",
-  "apt-get update && apt-get install -y git && if [ -d /workspace/HRM/.git ]; then cd /workspace/HRM && git fetch --all --prune; else git clone https://github.com/smallGreenTree/HRM.git /workspace/HRM && cd /workspace/HRM; fi && git checkout -B main origin/main && git pull --ff-only || true && if [ -f tools/infra/scripts/bootstrap-smoke.sh ]; then bash tools/infra/scripts/bootstrap-smoke.sh https://github.com/smallGreenTree/HRM.git main /workspace/HRM; else echo 'bootstrap-smoke.sh not found'; fi"
+  "apt-get update && apt-get install -y git && if [ -d /workspace/HRM/.git ]; then cd /workspace/HRM && git fetch --all --prune; else git clone https://github.com/smallGreenTree/HRM.git /workspace/HRM && cd /workspace/HRM; fi && git checkout -B inforidge origin/inforidge && git pull --ff-only || true && sleep infinity"
 ]
 
 # Environment Variables (optional)

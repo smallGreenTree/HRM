@@ -1,7 +1,7 @@
 {
   "version": 4,
   "terraform_version": "1.5.7",
-  "serial": 86,
+  "serial": 75,
   "lineage": "48ef1c1b-bd3f-8b73-c9df-358bb69b6a79",
   "outputs": {
     "gpu_info": {
@@ -22,7 +22,7 @@
       "type": "string"
     },
     "pod_id": {
-      "value": "dkxhxof1c4xygv",
+      "value": "9zvo4sb6ks4eof",
       "type": "string"
     },
     "pod_name": {
@@ -63,7 +63,7 @@
             "docker_start_cmd": [
               "/bin/bash",
               "-lc",
-              "apt-get update \u0026\u0026 apt-get install -y git \u0026\u0026 if [ -d /workspace/HRM/.git ]; then cd /workspace/HRM \u0026\u0026 git fetch --all --prune; else git clone https://github.com/smallGreenTree/HRM.git /workspace/HRM \u0026\u0026 cd /workspace/HRM; fi \u0026\u0026 git checkout -B inforidge origin/inforidge \u0026\u0026 git pull --ff-only || true \u0026\u0026 sleep infinity"
+              "apt-get update \u0026\u0026 apt-get install -y git \u0026\u0026 if [ -d /workspace/HRM/.git ]; then cd /workspace/HRM \u0026\u0026 git fetch --all --prune; else git clone https://github.com/smallGreenTree/HRM.git /workspace/HRM \u0026\u0026 cd /workspace/HRM; fi \u0026\u0026 git checkout -B main origin/main \u0026\u0026 git pull --ff-only || true \u0026\u0026 if [ -f tools/infra/scripts/bootstrap-smoke.sh ]; then bash tools/infra/scripts/bootstrap-smoke.sh https://github.com/smallGreenTree/HRM.git main /workspace/HRM; else echo 'bootstrap-smoke.sh not found'; fi"
             ],
             "env": {},
             "global_networking": false,
@@ -72,10 +72,10 @@
               "NVIDIA RTX A4000"
             ],
             "gpu_type_priority": "availability",
-            "id": "dkxhxof1c4xygv",
+            "id": "9zvo4sb6ks4eof",
             "image_name": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
             "interruptible": false,
-            "last_started_at": "2026-03-15 19:24:12.853 +0000 UTC",
+            "last_started_at": "2026-03-15 18:26:37.044 +0000 UTC",
             "locked": false,
             "machine_id": "uvvek55v968o",
             "memory_in_gb": 502,
