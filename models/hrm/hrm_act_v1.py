@@ -54,6 +54,9 @@ class HierarchicalReasoningModel_ACTV1Config(BaseModel):
     halt_max_steps: int
     halt_exploration_prob: float
     eval_use_halt_policy: bool = False
+    carry_residual_gated: bool = False
+    carry_gate_init: float = 0.95
+    carry_gate_per_channel: bool = True
 
     forward_dtype: str = "bfloat16"
 
@@ -152,6 +155,13 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
             self.q_head.weight.zero_()
             self.q_head.bias.fill_(-5)  # type: ignore
 
+        if self.config.carry_residual_gated:
+            gate_init = min(max(float(self.config.carry_gate_init), 1e-4), 1.0 - 1e-4)
+            init_logit = math.log(gate_init / (1.0 - gate_init))
+            gate_shape = (self.config.hidden_size,) if self.config.carry_gate_per_channel else ()
+            self.carry_gate_H = nn.Parameter(torch.full(gate_shape, init_logit, dtype=torch.float32))
+            self.carry_gate_L = nn.Parameter(torch.full(gate_shape, init_logit, dtype=torch.float32))
+
     def _input_embeddings(self, input: torch.Tensor, puzzle_identifiers: torch.Tensor):
         # Token embedding
         embedding = self.embed_tokens(input.to(torch.int32))
@@ -185,6 +195,12 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
             z_H=torch.where(reset_flag.view(-1, 1, 1), self.H_init, carry.z_H),
             z_L=torch.where(reset_flag.view(-1, 1, 1), self.L_init, carry.z_L),
         )
+
+    def _blend_carry(self, prev: torch.Tensor, candidate: torch.Tensor, gate_param: torch.Tensor) -> torch.Tensor:
+        gate = torch.sigmoid(gate_param).to(candidate.dtype)
+        if gate.ndim == 1:
+            gate = gate.view(1, 1, -1)
+        return prev + (1.0 - gate) * (candidate - prev)
 
     def forward(self, carry: HierarchicalReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor], return_layer_states: bool = False, return_z: bool = False) -> Tuple[HierarchicalReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor], Optional[Dict[str, List[torch.Tensor]]], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         seq_info = dict(
@@ -220,6 +236,10 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
         else:
             z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
             z_H = self.H_level(z_H, z_L, **seq_info)
+
+        if self.config.carry_residual_gated:
+            z_H = self._blend_carry(carry.z_H, z_H, self.carry_gate_H)
+            z_L = self._blend_carry(carry.z_L, z_L, self.carry_gate_L)
 
         # LM Outputs
         new_carry = HierarchicalReasoningModel_ACTV1InnerCarry(z_H=z_H.detach(), z_L=z_L.detach())  # New carry no grad

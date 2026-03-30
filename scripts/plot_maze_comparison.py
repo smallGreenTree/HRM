@@ -55,6 +55,19 @@ def read_act(path: Path) -> dict[str, list[float]]:
     }
 
 
+def _panel_max(*series_lists: list[float]) -> float:
+    values = []
+    for series in series_lists:
+        values.extend(value for value in series if value == value)
+    return max(values) if values else 1.0
+
+
+def _scale_percent(series: list[float], denom: float) -> list[float]:
+    if denom <= 0:
+        return [float("nan") if value != value else 0.0 for value in series]
+    return [float("nan") if value != value else (100.0 * value / denom) for value in series]
+
+
 def plot_eval(old_eval: dict[str, list[float]], new_eval: dict[str, list[float]], output_path: Path) -> None:
     fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
     series = [
@@ -93,8 +106,7 @@ def plot_layerwise(
     ]
 
     for layer_type, key, ax, title in panels:
-        ax.plot(old_small[layer_type]["layer_index"], old_small[layer_type][key], marker="o", linewidth=2, label="Old small")
-        ax.plot(old_full[layer_type]["layer_index"], old_full[layer_type][key], marker="s", linewidth=2, label="Old full")
+        ax.plot(old_full[layer_type]["layer_index"], old_full[layer_type][key], marker="s", linewidth=2, label="Old baseline")
         ax.plot(new[layer_type]["layer_index"], new[layer_type][key], marker="^", linewidth=2, label="Corrected")
         ax.set_title(title)
         ax.set_xlabel("Layer Index")
@@ -102,6 +114,52 @@ def plot_layerwise(
         ax.legend()
 
     fig.suptitle("Maze InfoRidge Comparison: Layerwise")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=180)
+    plt.close(fig)
+
+
+def plot_layerwise_percent(
+    old_small: dict[str, dict[str, list[float]]],
+    old_full: dict[str, dict[str, list[float]]],
+    new: dict[str, dict[str, list[float]]],
+    output_path: Path,
+) -> None:
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
+    panels = [
+        ("H", "I_Z_Y", axes[0, 0], "H Predictive MI (% of panel max)"),
+        ("L", "I_Z_Y", axes[0, 1], "L Predictive MI (% of panel max)"),
+        ("H", "I_dZ_Y", axes[1, 0], "H Incremental MI (% of panel max)"),
+        ("L", "I_dZ_Y", axes[1, 1], "L Incremental MI (% of panel max)"),
+    ]
+
+    for layer_type, key, ax, title in panels:
+        denom = _panel_max(
+            old_full[layer_type][key],
+            new[layer_type][key],
+        )
+        ax.plot(
+            old_full[layer_type]["layer_index"],
+            _scale_percent(old_full[layer_type][key], denom),
+            marker="s",
+            linewidth=2,
+            label="Old baseline",
+        )
+        ax.plot(
+            new[layer_type]["layer_index"],
+            _scale_percent(new[layer_type][key], denom),
+            marker="^",
+            linewidth=2,
+            label="Corrected",
+        )
+        ax.set_title(title)
+        ax.set_xlabel("Layer Index")
+        ax.set_ylabel("Percent")
+        ax.set_ylim(0, 105)
+        ax.grid(alpha=0.3)
+        ax.legend()
+
+    fig.suptitle("Maze InfoRidge Comparison: Layerwise (% of panel max)")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
@@ -120,8 +178,7 @@ def plot_act(
     ]
 
     for key, ax, title in panels:
-        ax.plot(old_small["act_step"], old_small[key], marker="o", linewidth=2, label="Old small")
-        ax.plot(old_full["act_step"], old_full[key], marker="s", linewidth=2, label="Old full")
+        ax.plot(old_full["act_step"], old_full[key], marker="s", linewidth=2, label="Old baseline")
         ax.plot(new["act_step"], new[key], marker="^", linewidth=2, label="Corrected")
         ax.set_title(title)
         ax.set_xlabel("ACT Step")
@@ -129,6 +186,35 @@ def plot_act(
         ax.legend()
 
     fig.suptitle("Maze InfoRidge Comparison: ACT Steps")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=180)
+    plt.close(fig)
+
+
+def plot_act_percent(
+    old_small: dict[str, list[float]],
+    old_full: dict[str, list[float]],
+    new: dict[str, list[float]],
+    output_path: Path,
+) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), constrained_layout=True)
+    panels = [
+        ("I_Z_Y", axes[0], "ACT Predictive MI (% of panel max)"),
+        ("I_dZ_Y", axes[1], "ACT Incremental MI (% of panel max)"),
+    ]
+
+    for key, ax, title in panels:
+        denom = _panel_max(old_full[key], new[key])
+        ax.plot(old_full["act_step"], _scale_percent(old_full[key], denom), marker="s", linewidth=2, label="Old baseline")
+        ax.plot(new["act_step"], _scale_percent(new[key], denom), marker="^", linewidth=2, label="Corrected")
+        ax.set_title(title)
+        ax.set_xlabel("ACT Step")
+        ax.set_ylabel("Percent")
+        ax.set_ylim(0, 105)
+        ax.grid(alpha=0.3)
+        ax.legend()
+
+    fig.suptitle("Maze InfoRidge Comparison: ACT Steps (% of panel max)")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=180)
     plt.close(fig)
@@ -150,10 +236,14 @@ def main() -> None:
     plot_eval(old_eval, new_eval, output_dir / "eval_comparison.png")
     plot_layerwise(old_small, old_full, new, output_dir / "layerwise_inforidge_comparison.png")
     plot_act(old_act, old_full_act, new_act, output_dir / "act_inforidge_comparison.png")
+    plot_layerwise_percent(old_small, old_full, new, output_dir / "layerwise_inforidge_percentage_comparison.png")
+    plot_act_percent(old_act, old_full_act, new_act, output_dir / "act_inforidge_percentage_comparison.png")
 
     print(f"Wrote {output_dir / 'eval_comparison.png'}")
     print(f"Wrote {output_dir / 'layerwise_inforidge_comparison.png'}")
     print(f"Wrote {output_dir / 'act_inforidge_comparison.png'}")
+    print(f"Wrote {output_dir / 'layerwise_inforidge_percentage_comparison.png'}")
+    print(f"Wrote {output_dir / 'act_inforidge_percentage_comparison.png'}")
 
 
 if __name__ == "__main__":
