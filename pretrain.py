@@ -364,7 +364,8 @@ def train_batch(config: PretrainConfig, train_state: TrainState, batch: Any, glo
 def evaluate(config: PretrainConfig, train_state: TrainState, eval_loader: torch.utils.data.DataLoader, eval_metadata: PuzzleDatasetMetadata, rank: int, world_size: int):
     with torch.inference_mode():
         set_ids = {k: idx for idx, k in enumerate(eval_metadata.sets)}
-        
+        eval_use_halt_policy = bool(config.arch.__pydantic_extra__.get("eval_use_halt_policy", False))  # type: ignore
+
         all_preds = {}
 
         metric_keys = []
@@ -375,6 +376,11 @@ def evaluate(config: PretrainConfig, train_state: TrainState, eval_loader: torch
         for set_name, batch, global_batch_size in eval_loader:
             # To device
             batch = {k: v.cuda() for k, v in batch.items()}
+            if eval_use_halt_policy and batch["inputs"].shape[0] != 1:
+                raise ValueError(
+                    "eval_use_halt_policy=true requires per-device eval batch size 1. "
+                    "Larger eval batches reset halted rows inside the batch and invalidate adaptive-halting metrics."
+                )
             with torch.device("cuda"):
                 carry = train_state.model.initial_carry(batch)  # type: ignore
 

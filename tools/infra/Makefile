@@ -104,7 +104,7 @@ apply-with-timer: check-api-key ## Apply and auto-destroy after N hours (make ap
 	@echo ""
 	@echo "⏰ Auto-destroy timer set for $(HOURS) hour(s)"
 	@echo "⏰ Started at: $$(date)"
-	@bash ../scripts/auto-destroy.sh $(HOURS)
+	@bash scripts/auto-destroy.sh $(ENV) $(HOURS)
 
 apply-with-idle-kill: check-api-key ## Apply and auto-destroy when GPU is idle (make apply-with-idle-kill IDLE_MIN=20 UTIL=5 POLL=120)
 	@if [ -z "$(IDLE_MIN)" ]; then \

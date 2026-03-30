@@ -53,6 +53,7 @@ class HierarchicalReasoningModel_ACTV1Config(BaseModel):
     # Halting Q-learning config
     halt_max_steps: int
     halt_exploration_prob: float
+    eval_use_halt_policy: bool = False
 
     forward_dtype: str = "bfloat16"
 
@@ -285,23 +286,25 @@ class HierarchicalReasoningModel_ACTV1(nn.Module):
             
             halted = is_last_step
 
-            # if training, and ACT is enabled
-            if self.training and (self.config.halt_max_steps > 1):
+            use_halt_policy = self.config.halt_max_steps > 1 and (self.training or self.config.eval_use_halt_policy)
+
+            # During evaluation the policy is deterministic: exploration stays disabled.
+            if use_halt_policy:
                 # Halt signal
-                # NOTE: During evaluation, always use max steps, this is to guarantee the same halting steps inside a batch for batching purposes
                 halted = halted | (q_halt_logits > q_continue_logits)
 
-                # Exploration
-                min_halt_steps = (torch.rand_like(q_halt_logits) < self.config.halt_exploration_prob) * torch.randint_like(new_steps, low=2, high=self.config.halt_max_steps + 1)
+                if self.training:
+                    # Exploration
+                    min_halt_steps = (torch.rand_like(q_halt_logits) < self.config.halt_exploration_prob) * torch.randint_like(new_steps, low=2, high=self.config.halt_max_steps + 1)
 
-                halted = halted & (new_steps >= min_halt_steps)
+                    halted = halted & (new_steps >= min_halt_steps)
 
-                # Compute target Q
-                # NOTE: No replay buffer and target networks for computing target Q-value.
-                # As batch_size is large, there're many parallel envs.
-                # Similar concept as PQN https://arxiv.org/abs/2407.04811
-                next_q_halt_logits, next_q_continue_logits = self.inner(new_inner_carry, new_current_data)[2]
-                
-                outputs["target_q_continue"] = torch.sigmoid(torch.where(is_last_step, next_q_halt_logits, torch.maximum(next_q_halt_logits, next_q_continue_logits)))
+                    # Compute target Q
+                    # NOTE: No replay buffer and target networks for computing target Q-value.
+                    # As batch_size is large, there're many parallel envs.
+                    # Similar concept as PQN https://arxiv.org/abs/2407.04811
+                    next_q_halt_logits, next_q_continue_logits = self.inner(new_inner_carry, new_current_data)[2]
+                    
+                    outputs["target_q_continue"] = torch.sigmoid(torch.where(is_last_step, next_q_halt_logits, torch.maximum(next_q_halt_logits, next_q_continue_logits)))
 
         return HierarchicalReasoningModel_ACTV1Carry(new_inner_carry, new_steps, halted, new_current_data), outputs
