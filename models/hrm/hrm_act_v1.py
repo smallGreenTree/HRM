@@ -57,6 +57,10 @@ class HierarchicalReasoningModel_ACTV1Config(BaseModel):
     carry_residual_gated: bool = False
     carry_gate_init: float = 0.95
     carry_gate_per_channel: bool = True
+    layer_intervention_level: Optional[str] = None
+    layer_intervention_layers: List[int] = []
+    layer_intervention_mode: str = "none"
+    layer_intervention_noise_std: float = 1.0
 
     forward_dtype: str = "bfloat16"
 
@@ -88,24 +92,57 @@ class HierarchicalReasoningModel_ACTV1Block(nn.Module):
 
 
 class HierarchicalReasoningModel_ACTV1ReasoningModule(nn.Module):
-    def __init__(self, layers: List[HierarchicalReasoningModel_ACTV1Block]):
+    def __init__(self, layers: List[HierarchicalReasoningModel_ACTV1Block], *, config: HierarchicalReasoningModel_ACTV1Config, level_name: str):
         super().__init__()
 
         self.layers = torch.nn.ModuleList(layers)
+        self.config = config
+        self.level_name = level_name
+
+    def _intervene(self, layer_index: int, before: torch.Tensor, after: torch.Tensor) -> torch.Tensor:
+        mode = self.config.layer_intervention_mode
+        target_level = self.config.layer_intervention_level
+        target_layers = self.config.layer_intervention_layers
+        if mode == "none" or target_level is None:
+            return after
+        if target_level.lower() != self.level_name.lower():
+            return after
+        if target_layers and layer_index not in target_layers:
+            return after
+
+        if mode == "bypass":
+            return before
+        if mode == "zero":
+            return torch.zeros_like(after)
+        if mode == "shuffle_batch":
+            if after.shape[0] <= 1:
+                return after
+            return after[torch.randperm(after.shape[0], device=after.device)]
+        if mode == "noise":
+            std = after.float().std().clamp_min(1e-6).to(after.dtype)
+            return after + torch.randn_like(after) * (float(self.config.layer_intervention_noise_std) * std)
+        if mode == "mean":
+            return after.mean(dim=0, keepdim=True).expand_as(after)
+
+        raise ValueError(f"Unknown layer_intervention_mode: {mode}")
 
     def forward(self, hidden_states: torch.Tensor, input_injection: torch.Tensor, collect: bool = False, **kwargs):
         # Input injection (add)
         hidden_states = hidden_states + input_injection
         # Layers
         if not collect:
-            for layer in self.layers:
+            for layer_index, layer in enumerate(self.layers):
+                before = hidden_states
                 hidden_states = layer(hidden_states=hidden_states, **kwargs)
+                hidden_states = self._intervene(layer_index, before, hidden_states)
 
             return hidden_states
 
         layer_states = []
-        for layer in self.layers:
+        for layer_index, layer in enumerate(self.layers):
+            before = hidden_states
             hidden_states = layer(hidden_states=hidden_states, **kwargs)
+            hidden_states = self._intervene(layer_index, before, hidden_states)
             layer_states.append(hidden_states)
 
         return hidden_states, layer_states
@@ -142,8 +179,16 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
             raise NotImplementedError()
 
         # Reasoning Layers
-        self.H_level = HierarchicalReasoningModel_ACTV1ReasoningModule(layers=[HierarchicalReasoningModel_ACTV1Block(self.config) for _i in range(self.config.H_layers)])
-        self.L_level = HierarchicalReasoningModel_ACTV1ReasoningModule(layers=[HierarchicalReasoningModel_ACTV1Block(self.config) for _i in range(self.config.L_layers)])
+        self.H_level = HierarchicalReasoningModel_ACTV1ReasoningModule(
+            layers=[HierarchicalReasoningModel_ACTV1Block(self.config) for _i in range(self.config.H_layers)],
+            config=self.config,
+            level_name="H",
+        )
+        self.L_level = HierarchicalReasoningModel_ACTV1ReasoningModule(
+            layers=[HierarchicalReasoningModel_ACTV1Block(self.config) for _i in range(self.config.L_layers)],
+            config=self.config,
+            level_name="L",
+        )
         
         # Initial states
         self.register_buffer("H_init", trunc_normal_init_(torch.empty(self.config.hidden_size, dtype=self.forward_dtype), std=1), persistent=True)
