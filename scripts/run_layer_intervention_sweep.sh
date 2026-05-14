@@ -42,9 +42,9 @@ run_case() {
     load_checkpoint_path="${CHECKPOINT_PATH}" \
     analysis_only=true \
     global_batch_size="${GLOBAL_BATCH_SIZE}" \
-    arch.layer_intervention_level="${level}" \
-    arch.layer_intervention_layers="[${layer}]" \
-    arch.layer_intervention_mode="${mode}" \
+    +arch.layer_intervention_level="${level}" \
+    +arch.layer_intervention_layers="[${layer}]" \
+    +arch.layer_intervention_mode="${mode}" \
     inforidge_config.enabled=true \
     inforidge_config.max_batches="${MAX_BATCHES}" \
     inforidge_config.max_tokens="${MAX_TOKENS}" \
@@ -68,7 +68,7 @@ python pretrain.py \
   load_checkpoint_path="${CHECKPOINT_PATH}" \
   analysis_only=true \
   global_batch_size="${GLOBAL_BATCH_SIZE}" \
-  arch.layer_intervention_mode=none \
+  +arch.layer_intervention_mode=none \
   inforidge_config.enabled=true \
   inforidge_config.max_batches="${MAX_BATCHES}" \
   inforidge_config.max_tokens="${MAX_TOKENS}" \
