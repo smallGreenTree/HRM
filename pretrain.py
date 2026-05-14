@@ -217,6 +217,32 @@ def _checkpoint_path(base_dir: str, step: int) -> str:
     return os.path.join(base_dir, f"step_{step}.pt")
 
 
+def _wandb_artifact_name(name: str) -> str:
+    safe = []
+    for ch in name:
+        safe.append(ch if ch.isalnum() or ch in "-_." else "-")
+    return "".join(safe).strip("-_.") or "checkpoint"
+
+
+def _log_checkpoint_artifact(config: PretrainConfig, checkpoint_file: str, step: int):
+    if wandb.run is None:
+        return
+
+    run_name = config.run_name or wandb.run.name or "run"
+    artifact_name = _wandb_artifact_name(f"{run_name}-step-{step}")
+    artifact = wandb.Artifact(artifact_name, type="model")
+    artifact.add_file(checkpoint_file)
+
+    for metadata_name in ("all_config.yaml", "eval_metrics.csv", "train_metrics.csv"):
+        if config.checkpoint_path is None:
+            continue
+        metadata_path = os.path.join(config.checkpoint_path, metadata_name)
+        if os.path.exists(metadata_path):
+            artifact.add_file(metadata_path)
+
+    wandb.run.log_artifact(artifact, aliases=["latest", f"step-{step}"])
+
+
 def _get_rng_state() -> dict[str, Any]:
     state: dict[str, Any] = {
         "python": random.getstate(),
@@ -251,7 +277,9 @@ def save_train_state(config: PretrainConfig, train_state: TrainState):
         "completed_iters": train_state.completed_iters,
         "rng_state": _get_rng_state(),
     }
-    torch.save(checkpoint, _checkpoint_path(config.checkpoint_path, train_state.step))
+    checkpoint_file = _checkpoint_path(config.checkpoint_path, train_state.step)
+    torch.save(checkpoint, checkpoint_file)
+    _log_checkpoint_artifact(config, checkpoint_file, train_state.step)
 
 
 def maybe_load_train_state(config: PretrainConfig, train_state: TrainState):
