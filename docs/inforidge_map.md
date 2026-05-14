@@ -2,6 +2,10 @@
 
 This document explains, in plain language, how the current codebase implements the InfoRidge idea. It is written as a practical map: where the logic lives, how the data moves, which paper claims are already implemented, and which ones are still pending.
 
+## Research Blueprint From arXiv 2605.01172
+
+The May 2026 paper at `https://arxiv.org/abs/2605.01172` is useful as a blueprint because it reframes generalization as a split between a signal channel that transfers from train to test and a reservoir channel that can fit training-specific or noisy structure. For our HRM work, the practical translation is: use InfoRidge to locate where target-relevant information concentrates across H/L layers and ACT steps, then test whether those high-information regions are also the regions that survive distribution shift, label noise, and layer perturbations. The first concrete experiment should be small and falsifiable: run synthetic arithmetic or maze with controlled label/noise corruption, log `I_Z_Y`, `I_dZ_Y`, eval accuracy, and layer-intervention drops, then compare a baseline optimizer against an SNR-gated Adam/AdamW variant inspired by the paper's population-risk gate. If the gate suppresses memorization while the InfoRidge peak becomes sharper or better aligned with eval performance, then the paper is not just adjacent theory; it gives us a real mechanism to study generalization in HRM.
+
 ## 1. Where to Start Reading
 
 The best entry point is `pretrain.py`, because this is where the training loop decides when to run InfoRidge. In the evaluation phase, the script calls `run_inforidge_analysis(...)` and `log_inforidge_results(...)`, and then optionally calls `run_inforidge_act_mi(...)` and `log_inforidge_act_mi(...)`. You can see these calls in `pretrain.py` around lines 459 to 469.
@@ -72,4 +76,3 @@ If you want a compact reference while reading:
 - Payload exposure from loss wrapper: `models/losses.py` in `ACTLossHead.forward(...)`.
 - Model production of layer states and ACT states: `models/hrm/hrm_act_v1.py`.
 - Tests: `tests/test_inforidge.py`.
-

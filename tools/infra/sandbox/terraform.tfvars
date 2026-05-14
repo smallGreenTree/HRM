@@ -15,7 +15,7 @@ docker_image = "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04"
 # GPU Configuration
 # Get available types with: make test-connection
 gpu_type_id = "NVIDIA GeForce RTX 4090"
-gpu_count   = 6
+gpu_count   = 1
 cloud_type  = "COMMUNITY"  # "COMMUNITY" (cheaper) or "SECURE" (reliable)
 
 # Storage Configuration

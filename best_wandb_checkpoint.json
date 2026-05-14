@@ -1,0 +1,24 @@
+{
+  "candidates": [
+    {
+      "best_metric": 0.7260000109672546,
+      "best_step": 20832,
+      "checkpoint_path": "/workspace/HRM/checkpoints/maze-4090-6gpu-corrected/step_20832.pt",
+      "metric_key": "all.exact_accuracy",
+      "run_id": "1qjy3m40",
+      "run_name": "maze-4090-6gpu-corrected",
+      "state": "finished",
+      "url": "https://wandb.ai/sotantep-personal-project/maze-hrm/runs/1qjy3m40"
+    }
+  ],
+  "winner": {
+    "best_metric": 0.7260000109672546,
+    "best_step": 20832,
+    "checkpoint_path": "/workspace/HRM/checkpoints/maze-4090-6gpu-corrected/step_20832.pt",
+    "metric_key": "all.exact_accuracy",
+    "run_id": "1qjy3m40",
+    "run_name": "maze-4090-6gpu-corrected",
+    "state": "finished",
+    "url": "https://wandb.ai/sotantep-personal-project/maze-hrm/runs/1qjy3m40"
+  }
+}
