@@ -1,5 +1,6 @@
 from typing import Optional, Any, Sequence, List
 from dataclasses import dataclass
+from collections.abc import Mapping
 import os
 import math
 import csv
@@ -98,6 +99,18 @@ class TrainState:
     step: int
     total_steps: int
     completed_iters: int
+
+
+def _to_plain_config(value: Any) -> Any:
+    if isinstance(value, pydantic.BaseModel):
+        return _to_plain_config(value.model_dump())
+    if isinstance(value, Mapping):
+        return {str(k): _to_plain_config(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_plain_config(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def create_dataloader(config: PretrainConfig, split: str, rank: int, world_size: int, **kwargs):
@@ -533,7 +546,7 @@ def save_code_and_config(config: PretrainConfig):
     # Dump config as yaml
     config_file = os.path.join(config.checkpoint_path, "all_config.yaml")
     with open(config_file, "wt") as f:
-        yaml.dump(config.model_dump(), f)
+        yaml.safe_dump(_to_plain_config(config), f, sort_keys=True)
 
     # Log code
     wandb.run.log_code(config.checkpoint_path)
@@ -600,7 +613,7 @@ def launch(hydra_config: DictConfig):
         progress_bar = tqdm.tqdm(total=train_state.total_steps)
         progress_bar.update(train_state.step)
 
-        wandb.init(project=config.project_name, name=config.run_name, config=config.model_dump(), settings=wandb.Settings(_disable_stats=True))  # type: ignore
+        wandb.init(project=config.project_name, name=config.run_name, config=_to_plain_config(config), settings=wandb.Settings(_disable_stats=True))  # type: ignore
         wandb.log({"num_params": sum(x.numel() for x in train_state.model.parameters())}, step=0)
         save_code_and_config(config)
 
