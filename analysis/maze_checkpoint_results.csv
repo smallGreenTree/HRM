@@ -1,0 +1,20 @@
+run_name,hardware,step,accuracy,exact_accuracy,lm_loss,q_halt_accuracy,q_halt_loss,steps,source
+maze-4090-6gpu-corrected,6x RTX 4090,3472,0.9579878,0.073,0.123059206,0.813,2.024825,16.0,chat-log-and-wandb-run-1qjy3m40
+maze-4090-6gpu-corrected,6x RTX 4090,6944,0.96862,0.058,0.09447878,0.922,1.2805198,16.0,chat-log-and-wandb-run-1qjy3m40
+maze-4090-6gpu-corrected,6x RTX 4090,10416,0.9804923,0.0,0.06549694,1.0,0.9675319,16.0,chat-log-and-wandb-run-1qjy3m40
+maze-4090-6gpu-corrected,6x RTX 4090,13888,0.9841622,0.443,0.07873177,0.596,1.6616613,16.0,chat-log-and-wandb-run-1qjy3m40
+maze-4090-6gpu-corrected,6x RTX 4090,17360,0.98801565,0.646,0.06626102,0.722,1.8655839,16.0,chat-log-and-wandb-run-1qjy3m40
+maze-4090-6gpu-corrected,6x RTX 4090,20832,0.9912611,0.726,0.04901285,0.77,1.8402635,16.0,chat-log-and-wandb-run-1qjy3m40
+maze-4090-6gpu-corrected,6x RTX 4090,24304,0.9867388,0.599,0.06890831,0.774,1.1755852,16.0,chat-log-and-wandb-run-1qjy3m40
+maze-4090-6gpu-corrected,6x RTX 4090,27776,0.9903223,0.688,0.055962447,0.798,1.1048293,16.0,chat-log-and-wandb-run-1qjy3m40
+maze-4090-6gpu-corrected,6x RTX 4090,31248,0.9901678,0.721,0.05634913,0.766,1.0742276,16.0,chat-log-and-wandb-run-1qjy3m40
+maze-4090-6gpu-corrected,6x RTX 4090,34720,0.9563501,0.065,0.14389803,0.944,0.58246464,16.0,chat-log-and-wandb-run-1qjy3m40
+maze-4090-rebuild-a100x2,2x A100 80GB,3472,0.9598067,0.126,0.116679214,0.905,1.5928576,16.0,chat-log-and-wandb-run-blxvmdrv
+maze-4090-rebuild-a100x2,2x A100 80GB,6944,0.98600227,0.573,0.053304285,0.795,1.5794349,16.0,chat-log-and-wandb-run-blxvmdrv
+maze-4090-rebuild-a100x2,2x A100 80GB,10416,0.98910326,0.67,0.058265474,0.759,1.7570276,16.0,chat-log-and-wandb-run-blxvmdrv
+maze-4090-rebuild-a100x2,2x A100 80GB,13888,0.9884478,0.639,0.056740202,0.789,1.7371306,16.0,chat-log-and-wandb-run-blxvmdrv
+maze-4090-rebuild-a100x2,2x A100 80GB,17360,0.9878467,0.639,0.051750183,0.764,1.0384643,16.0,chat-log-and-wandb-run-blxvmdrv
+maze-4090-rebuild-a100x2,2x A100 80GB,20832,0.98949,0.644,0.06503947,0.731,1.2486799,16.0,chat-log-and-wandb-run-blxvmdrv
+maze-4090-rebuild-a100x2,2x A100 80GB,24304,0.9914878,0.736,0.051502433,0.769,2.1780994,16.0,chat-log-and-wandb-run-blxvmdrv
+maze-4090-rebuild-a100x2,2x A100 80GB,27776,0.99181885,0.735,0.04999027,0.793,1.7982483,16.0,chat-log-and-wandb-run-blxvmdrv
+maze-4090-rebuild-a100x2,2x A100 80GB,31248,0.98832554,0.665,0.067970656,0.734,1.7642615,16.0,chat-log-and-wandb-run-blxvmdrv
