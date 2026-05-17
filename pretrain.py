@@ -259,7 +259,10 @@ def _set_rng_state(state: dict[str, Any]):
     if "torch" in state:
         torch.set_rng_state(state["torch"])
     if "cuda" in state and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(state["cuda"])
+        cuda_state = state["cuda"]
+        if isinstance(cuda_state, (list, tuple)):
+            cuda_state = cuda_state[: torch.cuda.device_count()]
+        torch.cuda.set_rng_state_all(cuda_state)
 
 
 def save_train_state(config: PretrainConfig, train_state: TrainState):
