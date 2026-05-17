@@ -49,7 +49,7 @@ def build_config(args: argparse.Namespace) -> PretrainConfig:
                 f"global_batch_size={args.global_batch_size}",
                 f"load_checkpoint_path={args.checkpoint}",
                 "analysis_only=true",
-                f"seed={args.seed}",
+                f"+seed={args.seed}",
                 "project_name=hidden-dynamics",
                 f"run_name={args.run_name}",
                 "checkpoint_path=null",
