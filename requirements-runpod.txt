@@ -14,3 +14,4 @@ setuptools
 setuptools-scm
 wheel
 ninja
+matplotlib
