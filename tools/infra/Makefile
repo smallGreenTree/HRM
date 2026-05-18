@@ -1,7 +1,7 @@
 # Makefile for Terraform/Terragrunt operations
 # Provides convenient commands for common operations
 
-.PHONY: help init plan apply destroy clean validate fmt check-api-key gpu-types apply-with-timer apply-with-idle-kill startup-smoke
+.PHONY: help init plan apply destroy clean validate fmt check-api-key gpu-types apply-with-timer apply-with-idle-kill startup-smoke state-list forget-pod
 
 # Default target
 .DEFAULT_GOAL := help
@@ -60,6 +60,12 @@ output: ## Show outputs
 
 output-json: ## Show outputs in JSON format
 	cd $(ENV) && terraform output -json
+
+state-list: ## List Terraform state resources
+	cd $(ENV) && terraform state list
+
+forget-pod: ## Forget pod from Terraform state after manually deleting it in RunPod UI
+	cd $(ENV) && terraform state rm module.runpod_pod.runpod_pod.gpu_instance
 
 ssh: ## SSH into the pod (RunPod proxy)
 	@bash scripts/ssh-runpod.sh $(ENV)
