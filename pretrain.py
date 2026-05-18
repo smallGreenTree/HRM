@@ -621,6 +621,7 @@ def launch(hydra_config: DictConfig):
         train_state.model.eval()
         metrics = evaluate(config, train_state, eval_loader, eval_metadata, rank=RANK, world_size=WORLD_SIZE)
         if RANK == 0 and metrics is not None:
+            log_metrics_locally(config, train_state, metrics, split="eval")
             wandb.log(metrics, step=train_state.step)
 
         if config.inforidge_config.enabled:
