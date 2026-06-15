@@ -2,9 +2,9 @@
 # Copy to a private tfvars file or pass with -var-file. Never store the API key here.
 pod_name          = "hrm-clean-information-flow"
 docker_image      = "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04"
-gpu_type_id       = "NVIDIA H100 80GB HBM3"
+gpu_type_id       = "NVIDIA A40"
 gpu_count         = 1
-cloud_type        = "SECURE"
+cloud_type        = "COMMUNITY"
 container_disk_gb = 120
 public_ip         = true
 
