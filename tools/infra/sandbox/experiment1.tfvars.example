@@ -11,5 +11,5 @@ public_ip         = true
 startup_command = [
   "/bin/bash",
   "-lc",
-  "apt-get update && apt-get install -y git && if [ -d /workspace/HRM/.git ]; then cd /workspace/HRM && git fetch --all --prune; else git clone https://github.com/smallGreenTree/HRM.git /workspace/HRM && cd /workspace/HRM; fi && git checkout gated-residual && git pull --ff-only && sleep infinity"
+  "apt-get update && apt-get install -y git && if [ -d /workspace/HRM/.git ]; then cd /workspace/HRM && git fetch --all --prune; else git clone https://github.com/smallGreenTree/HRM.git /workspace/HRM && cd /workspace/HRM; fi && git checkout codex/hrm-recurrent-representation-dynamics && git pull --ff-only && sleep infinity"
 ]
