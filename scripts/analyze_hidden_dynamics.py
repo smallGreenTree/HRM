@@ -21,6 +21,7 @@ import torch
 import torch.nn.functional as F
 from omegaconf import OmegaConf
 
+from inforidge.behavior import per_example_behavior
 from pretrain import PretrainConfig, create_dataloader, init_train_state, maybe_load_train_state
 
 
@@ -127,24 +128,36 @@ def collect_rows(config: PretrainConfig, max_batches: int) -> list[dict[str, Any
                 z_h = outputs["z_H"].detach()
                 z_l = outputs["z_L"].detach()
                 logits = outputs["logits"].detach()
-                step_records.append((z_h, z_l, logits))
+                behavior = per_example_behavior(logits, labels)
+                step_records.append(
+                    (
+                        z_h,
+                        z_l,
+                        behavior,
+                        outputs["q_halt_logits"].detach(),
+                        outputs["q_continue_logits"].detach(),
+                    )
+                )
                 if bool(carry.halted.all().item()):
                     break
 
-            final_logits = step_records[-1][2]
-            preds = torch.argmax(final_logits, dim=-1).to(torch.int64)
-            valid = labels != IGNORE_LABEL_ID
-            success = torch.tensor(
-                [torch.equal(preds[i][valid[i]], labels[i][valid[i]]) for i in range(labels.shape[0])],
-                device=labels.device,
-                dtype=torch.bool,
-            )
+            exact_by_step = torch.stack([record[2]["exact_accuracy"] for record in step_records])
+            success = exact_by_step[-1]
+            first_solved_step = torch.zeros(labels.shape[0], dtype=torch.int64, device=labels.device)
+            regressed_after_solve = torch.zeros(labels.shape[0], dtype=torch.bool, device=labels.device)
+            for i in range(labels.shape[0]):
+                solved_steps = torch.nonzero(exact_by_step[:, i], as_tuple=False).squeeze(-1)
+                if solved_steps.numel() == 0:
+                    continue
+                first_idx = int(solved_steps[0].item())
+                first_solved_step[i] = first_idx + 1
+                regressed_after_solve[i] = bool((~exact_by_step[first_idx:, i]).any().item())
 
             prev_h = None
             prev_l = None
             prev_dh = None
             prev_dl = None
-            for step_idx, (z_h, z_l, _logits) in enumerate(step_records, start=1):
+            for step_idx, (z_h, z_l, behavior, q_halt, q_continue) in enumerate(step_records, start=1):
                 h = pool_valid_tokens(z_h, labels, prefix_len)
                 l = pool_valid_tokens(z_l, labels, prefix_len)
                 h_norm = h.float().norm(dim=-1)
@@ -181,6 +194,15 @@ def collect_rows(config: PretrainConfig, max_batches: int) -> list[dict[str, Any
                             "example_index": example_offset + i,
                             "act_step": step_idx,
                             "success": int(bool(success[i].item())),
+                            "cell_accuracy": float(behavior["cell_accuracy"][i].item()),
+                            "exact_accuracy": int(bool(behavior["exact_accuracy"][i].item())),
+                            "target_nll": float(behavior["target_nll"][i].item()),
+                            "target_margin": float(behavior["target_margin"][i].item()),
+                            "q_halt_logit": float(q_halt[i].item()),
+                            "q_continue_logit": float(q_continue[i].item()),
+                            "first_solved_step": int(first_solved_step[i].item()),
+                            "is_first_solved_step": int(first_solved_step[i].item() == step_idx),
+                            "regressed_after_solve": int(bool(regressed_after_solve[i].item())),
                             "h_norm": float(h_norm[i].item()),
                             "l_norm": float(l_norm[i].item()),
                             "h_delta": float(h_delta[i].item()),
@@ -212,6 +234,12 @@ def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     metrics = [
+        "cell_accuracy",
+        "exact_accuracy",
+        "target_nll",
+        "target_margin",
+        "q_halt_logit",
+        "q_continue_logit",
         "h_norm",
         "l_norm",
         "h_delta",
@@ -232,6 +260,8 @@ def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if not group_rows:
                 continue
             out: dict[str, Any] = {"act_step": step, "group": group_name, "count": len(group_rows)}
+            out["first_solved_count"] = sum(int(row["is_first_solved_step"]) for row in group_rows)
+            out["regressed_after_solve_count"] = sum(int(row["regressed_after_solve"]) for row in group_rows)
             for metric in metrics:
                 values = [float(row[metric]) for row in group_rows]
                 out[f"{metric}_mean"] = sum(values) / len(values)
@@ -245,8 +275,10 @@ def plot_summary(summary: list[dict[str, Any]], output_path: Path) -> None:
     for row in summary:
         by_group.setdefault(str(row["group"]), []).append(row)
 
-    fig, axes = plt.subplots(2, 2, figsize=(13, 9), constrained_layout=True)
+    fig, axes = plt.subplots(2, 3, figsize=(17, 9), constrained_layout=True)
     panels = [
+        ("target_nll_mean", "Target NLL"),
+        ("exact_accuracy_mean", "Exact Accuracy"),
         ("h_delta_mean", "H Update Magnitude"),
         ("l_delta_mean", "L Update Magnitude"),
         ("h_l_cosine_mean", "H/L Cosine Similarity"),

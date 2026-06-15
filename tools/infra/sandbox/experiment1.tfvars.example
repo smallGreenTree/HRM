@@ -1,0 +1,15 @@
+# Experiment 1: clean information-flow baseline.
+# Copy to a private tfvars file or pass with -var-file. Never store the API key here.
+pod_name          = "hrm-clean-information-flow"
+docker_image      = "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04"
+gpu_type_id       = "NVIDIA RTX 4090"
+gpu_count         = 1
+cloud_type        = "SECURE"
+container_disk_gb = 120
+public_ip         = true
+
+startup_command = [
+  "/bin/bash",
+  "-lc",
+  "apt-get update && apt-get install -y git && if [ -d /workspace/HRM/.git ]; then cd /workspace/HRM && git fetch --all --prune; else git clone https://github.com/smallGreenTree/HRM.git /workspace/HRM && cd /workspace/HRM; fi && git checkout gated-residual && git pull --ff-only && sleep infinity"
+]

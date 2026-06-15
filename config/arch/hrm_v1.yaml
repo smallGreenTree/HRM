@@ -9,6 +9,7 @@ eval_use_halt_policy: false
 carry_residual_gated: false
 carry_gate_init: 0.95
 carry_gate_per_channel: true
+layer_intervention_act_steps: []
 
 H_cycles: 2
 L_cycles: 2

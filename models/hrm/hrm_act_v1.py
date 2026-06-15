@@ -59,6 +59,7 @@ class HierarchicalReasoningModel_ACTV1Config(BaseModel):
     carry_gate_per_channel: bool = True
     layer_intervention_level: Optional[str] = None
     layer_intervention_layers: List[int] = []
+    layer_intervention_act_steps: List[int] = []
     layer_intervention_mode: str = "none"
     layer_intervention_noise_std: float = 1.0
 
@@ -99,7 +100,13 @@ class HierarchicalReasoningModel_ACTV1ReasoningModule(nn.Module):
         self.config = config
         self.level_name = level_name
 
-    def _intervene(self, layer_index: int, before: torch.Tensor, after: torch.Tensor) -> torch.Tensor:
+    def _intervene(
+        self,
+        layer_index: int,
+        before: torch.Tensor,
+        after: torch.Tensor,
+        intervention_step: Optional[torch.Tensor],
+    ) -> torch.Tensor:
         mode = self.config.layer_intervention_mode
         target_level = self.config.layer_intervention_level
         target_layers = self.config.layer_intervention_layers
@@ -110,23 +117,47 @@ class HierarchicalReasoningModel_ACTV1ReasoningModule(nn.Module):
         if target_layers and layer_index not in target_layers:
             return after
 
+        target_steps = self.config.layer_intervention_act_steps
+        active_rows = None
+        if target_steps:
+            if intervention_step is None:
+                return after
+            active_rows = torch.zeros_like(intervention_step, dtype=torch.bool)
+            for target_step in target_steps:
+                active_rows |= intervention_step == target_step
+            if not bool(active_rows.any().item()):
+                return after
+
         if mode == "bypass":
-            return before
-        if mode == "zero":
-            return torch.zeros_like(after)
-        if mode == "shuffle_batch":
+            intervened = before
+        elif mode == "zero":
+            intervened = torch.zeros_like(after)
+        elif mode == "shuffle_batch":
             if after.shape[0] <= 1:
                 return after
-            return after[torch.randperm(after.shape[0], device=after.device)]
-        if mode == "noise":
+            intervened = after[torch.randperm(after.shape[0], device=after.device)]
+        elif mode == "noise":
             std = after.float().std().clamp_min(1e-6).to(after.dtype)
-            return after + torch.randn_like(after) * (float(self.config.layer_intervention_noise_std) * std)
-        if mode == "mean":
-            return after.mean(dim=0, keepdim=True).expand_as(after)
+            intervened = after + torch.randn_like(after) * (float(self.config.layer_intervention_noise_std) * std)
+        elif mode == "mean":
+            intervened = after.mean(dim=0, keepdim=True).expand_as(after)
+        else:
+            raise ValueError(f"Unknown layer_intervention_mode: {mode}")
 
-        raise ValueError(f"Unknown layer_intervention_mode: {mode}")
+        if active_rows is None:
+            return intervened
+        row_mask = active_rows.view((-1,) + (1,) * (after.ndim - 1))
+        return torch.where(row_mask, intervened, after)
 
-    def forward(self, hidden_states: torch.Tensor, input_injection: torch.Tensor, collect: bool = False, **kwargs):
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        input_injection: torch.Tensor,
+        collect: bool = False,
+        collect_inputs: bool = False,
+        intervention_step: Optional[torch.Tensor] = None,
+        **kwargs,
+    ):
         # Input injection (add)
         hidden_states = hidden_states + input_injection
         # Layers
@@ -134,17 +165,22 @@ class HierarchicalReasoningModel_ACTV1ReasoningModule(nn.Module):
             for layer_index, layer in enumerate(self.layers):
                 before = hidden_states
                 hidden_states = layer(hidden_states=hidden_states, **kwargs)
-                hidden_states = self._intervene(layer_index, before, hidden_states)
+                hidden_states = self._intervene(layer_index, before, hidden_states, intervention_step)
 
             return hidden_states
 
+        layer_inputs = []
         layer_states = []
         for layer_index, layer in enumerate(self.layers):
             before = hidden_states
+            if collect_inputs:
+                layer_inputs.append(before)
             hidden_states = layer(hidden_states=hidden_states, **kwargs)
-            hidden_states = self._intervene(layer_index, before, hidden_states)
+            hidden_states = self._intervene(layer_index, before, hidden_states, intervention_step)
             layer_states.append(hidden_states)
 
+        if collect_inputs:
+            return hidden_states, layer_inputs, layer_states
         return hidden_states, layer_states
 
 
@@ -247,13 +283,62 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
             gate = gate.view(1, 1, -1)
         return prev + (1.0 - gate) * (candidate - prev)
 
-    def forward(self, carry: HierarchicalReasoningModel_ACTV1InnerCarry, batch: Dict[str, torch.Tensor], return_layer_states: bool = False, return_z: bool = False) -> Tuple[HierarchicalReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor], Optional[Dict[str, List[torch.Tensor]]], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+    def forward(
+        self,
+        carry: HierarchicalReasoningModel_ACTV1InnerCarry,
+        batch: Dict[str, torch.Tensor],
+        return_layer_states: bool = False,
+        return_block_traces: bool = False,
+        return_z: bool = False,
+        intervention_step: Optional[torch.Tensor] = None,
+    ) -> Tuple[HierarchicalReasoningModel_ACTV1InnerCarry, torch.Tensor, Tuple[torch.Tensor, torch.Tensor], Optional[Dict[str, object]], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         seq_info = dict(
             cos_sin=self.rotary_emb() if hasattr(self, "rotary_emb") else None,
         )
 
         # Input encoding
         input_embeddings = self._input_embeddings(batch["inputs"], batch["puzzle_identifiers"])
+
+        block_traces: Optional[Dict[str, List[Dict[str, object]]]] = None
+        if return_block_traces:
+            block_traces = {"H": [], "L": []}
+
+        def run_level(
+            level: HierarchicalReasoningModel_ACTV1ReasoningModule,
+            level_name: str,
+            hidden_states: torch.Tensor,
+            input_injection: torch.Tensor,
+            *,
+            h_cycle: int,
+            l_cycle: Optional[int],
+            phase: str,
+        ) -> torch.Tensor:
+            if block_traces is None:
+                return level(
+                    hidden_states,
+                    input_injection,
+                    intervention_step=intervention_step,
+                    **seq_info,
+                )
+
+            result, block_inputs, block_outputs = level(
+                hidden_states,
+                input_injection,
+                collect=True,
+                collect_inputs=True,
+                intervention_step=intervention_step,
+                **seq_info,
+            )
+            block_traces[level_name].append(
+                {
+                    "h_cycle": h_cycle,
+                    "l_cycle": l_cycle,
+                    "phase": phase,
+                    "inputs": [value.detach() for value in block_inputs],
+                    "outputs": [value.detach() for value in block_outputs],
+                }
+            )
+            return result
 
         # Forward iterations
         with torch.no_grad():
@@ -262,25 +347,92 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
             for _H_step in range(self.config.H_cycles):
                 for _L_step in range(self.config.L_cycles):
                     if not ((_H_step == self.config.H_cycles - 1) and (_L_step == self.config.L_cycles - 1)):
-                        z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
+                        z_L = run_level(
+                            self.L_level,
+                            "L",
+                            z_L,
+                            z_H + input_embeddings,
+                            h_cycle=_H_step,
+                            l_cycle=_L_step,
+                            phase="recurrent",
+                        )
 
                 if not (_H_step == self.config.H_cycles - 1):
-                    z_H = self.H_level(z_H, z_L, **seq_info)
+                    z_H = run_level(
+                        self.H_level,
+                        "H",
+                        z_H,
+                        z_L,
+                        h_cycle=_H_step,
+                        l_cycle=None,
+                        phase="recurrent",
+                    )
 
         assert not z_H.requires_grad and not z_L.requires_grad
 
         # 1-step grad
-        layer_states = None
-        if return_layer_states:
-            z_L, z_L_layers = self.L_level(z_L, z_H + input_embeddings, collect=True, **seq_info)
-            z_H, z_H_layers = self.H_level(z_H, z_L, collect=True, **seq_info)
+        layer_states: Optional[Dict[str, object]] = None
+        if return_block_traces:
+            z_L = run_level(
+                self.L_level,
+                "L",
+                z_L,
+                z_H + input_embeddings,
+                h_cycle=self.config.H_cycles - 1,
+                l_cycle=self.config.L_cycles - 1,
+                phase="final",
+            )
+            z_H = run_level(
+                self.H_level,
+                "H",
+                z_H,
+                z_L,
+                h_cycle=self.config.H_cycles - 1,
+                l_cycle=None,
+                phase="final",
+            )
+            assert block_traces is not None
             layer_states = {
+                "L_traces": block_traces["L"],
+                "H_traces": block_traces["H"],
+            }
+            if return_layer_states:
+                final_l = block_traces["L"][-1]
+                final_h = block_traces["H"][-1]
+                layer_states.update(
+                    {
+                        "L_before": final_l["inputs"],
+                        "L": final_l["outputs"],
+                        "H_before": final_h["inputs"],
+                        "H": final_h["outputs"],
+                    }
+                )
+        elif return_layer_states:
+            z_L, z_L_inputs, z_L_layers = self.L_level(
+                z_L,
+                z_H + input_embeddings,
+                collect=True,
+                collect_inputs=True,
+                intervention_step=intervention_step,
+                **seq_info,
+            )
+            z_H, z_H_inputs, z_H_layers = self.H_level(
+                z_H,
+                z_L,
+                collect=True,
+                collect_inputs=True,
+                intervention_step=intervention_step,
+                **seq_info,
+            )
+            layer_states = {
+                "L_before": [x.detach() for x in z_L_inputs],
                 "L": [x.detach() for x in z_L_layers],
+                "H_before": [x.detach() for x in z_H_inputs],
                 "H": [x.detach() for x in z_H_layers],
             }
         else:
-            z_L = self.L_level(z_L, z_H + input_embeddings, **seq_info)
-            z_H = self.H_level(z_H, z_L, **seq_info)
+            z_L = self.L_level(z_L, z_H + input_embeddings, intervention_step=intervention_step, **seq_info)
+            z_H = self.H_level(z_H, z_L, intervention_step=intervention_step, **seq_info)
 
         if self.config.carry_residual_gated:
             z_H = self._blend_carry(carry.z_H, z_H, self.carry_gate_H)
@@ -321,7 +473,14 @@ class HierarchicalReasoningModel_ACTV1(nn.Module):
             current_data={k: torch.empty_like(v) for k, v in batch.items()}
         )
         
-    def forward(self, carry: HierarchicalReasoningModel_ACTV1Carry, batch: Dict[str, torch.Tensor], return_layer_states: bool = False, return_z: bool = False) -> Tuple[HierarchicalReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
+    def forward(
+        self,
+        carry: HierarchicalReasoningModel_ACTV1Carry,
+        batch: Dict[str, torch.Tensor],
+        return_layer_states: bool = False,
+        return_block_traces: bool = False,
+        return_z: bool = False,
+    ) -> Tuple[HierarchicalReasoningModel_ACTV1Carry, Dict[str, torch.Tensor]]:
         # Update data, carry (removing halted sequences)
         new_inner_carry = self.inner.reset_carry(carry.halted, carry.inner_carry)
         
@@ -330,16 +489,29 @@ class HierarchicalReasoningModel_ACTV1(nn.Module):
         new_current_data = {k: torch.where(carry.halted.view((-1, ) + (1, ) * (batch[k].ndim - 1)), batch[k], v) for k, v in carry.current_data.items()}
 
         # Forward inner model
-        new_inner_carry, logits, (q_halt_logits, q_continue_logits), layer_states, z_pair = self.inner(new_inner_carry, new_current_data, return_layer_states=return_layer_states, return_z=return_z)
+        intervention_step = new_steps + 1
+        new_inner_carry, logits, (q_halt_logits, q_continue_logits), layer_states, z_pair = self.inner(
+            new_inner_carry,
+            new_current_data,
+            return_layer_states=return_layer_states,
+            return_block_traces=return_block_traces,
+            return_z=return_z,
+            intervention_step=intervention_step,
+        )
 
         outputs = {
             "logits": logits,
             "q_halt_logits": q_halt_logits,
             "q_continue_logits": q_continue_logits
         }
-        if layer_states is not None:
+        if layer_states is not None and return_layer_states:
+            outputs["block_inputs_H"] = layer_states["H_before"]
             outputs["layer_states_H"] = layer_states["H"]
+            outputs["block_inputs_L"] = layer_states["L_before"]
             outputs["layer_states_L"] = layer_states["L"]
+        if layer_states is not None and return_block_traces:
+            outputs["block_traces_H"] = layer_states["H_traces"]
+            outputs["block_traces_L"] = layer_states["L_traces"]
         if z_pair is not None:
             outputs["z_H"] = z_pair[0]
             outputs["z_L"] = z_pair[1]

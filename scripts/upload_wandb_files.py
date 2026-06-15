@@ -16,22 +16,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--path", required=True, help="File or directory to upload.")
     parser.add_argument("--run-name", help="Readable W&B run name for this upload.")
     parser.add_argument("--recursive", action="store_true", help="Upload files recursively when --path is a directory.")
+    parser.add_argument(
+        "--exclude-glob",
+        action="append",
+        default=[],
+        help="Glob relative to --path to exclude. May be passed more than once.",
+    )
     return parser.parse_args()
 
 
-def iter_files(path: Path, recursive: bool) -> list[Path]:
+def iter_files(path: Path, recursive: bool, exclude_globs: list[str] | None = None) -> list[Path]:
     if path.is_file():
         return [path]
     if not path.is_dir():
         raise FileNotFoundError(f"Path does not exist: {path}")
     pattern = "**/*" if recursive else "*"
-    return sorted(p for p in path.glob(pattern) if p.is_file())
+    exclude_globs = exclude_globs or []
+    return sorted(
+        candidate
+        for candidate in path.glob(pattern)
+        if candidate.is_file()
+        and not any(candidate.relative_to(path).match(exclude) for exclude in exclude_globs)
+    )
 
 
 def main() -> None:
     args = parse_args()
     source = Path(args.path).resolve()
-    files = iter_files(source, args.recursive)
+    files = iter_files(source, args.recursive, args.exclude_glob)
     if not files:
         raise ValueError(f"No files found to upload from {source}")
 
