@@ -62,6 +62,10 @@ class HierarchicalReasoningModel_ACTV1Config(BaseModel):
     layer_intervention_act_steps: List[int] = []
     layer_intervention_mode: str = "none"
     layer_intervention_noise_std: float = 1.0
+    merge_intervention_level: Optional[str] = None
+    merge_intervention_source: Optional[str] = None
+    merge_intervention_scale: float = 1.0
+    merge_intervention_act_steps: List[int] = []
 
     forward_dtype: str = "bfloat16"
 
@@ -283,6 +287,79 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
             gate = gate.view(1, 1, -1)
         return prev + (1.0 - gate) * (candidate - prev)
 
+    def _scale_merge_source(
+        self,
+        value: torch.Tensor,
+        *,
+        level: str,
+        source: str,
+        intervention_step: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        target_level = self.config.merge_intervention_level
+        target_source = self.config.merge_intervention_source
+        scale = float(self.config.merge_intervention_scale)
+        if target_level is None or target_source is None or scale == 1.0:
+            return value
+        if target_level.lower() != level.lower() or target_source.lower() != source.lower():
+            return value
+
+        scaled = value * scale
+        target_steps = self.config.merge_intervention_act_steps
+        if not target_steps:
+            return scaled
+        if intervention_step is None:
+            return value
+
+        active_rows = torch.zeros_like(intervention_step, dtype=torch.bool)
+        for target_step in target_steps:
+            active_rows |= intervention_step == target_step
+        row_mask = active_rows.view((-1,) + (1,) * (value.ndim - 1))
+        return torch.where(row_mask, scaled, value)
+
+    def _prepare_level_inputs(
+        self,
+        *,
+        level: str,
+        z_H: torch.Tensor,
+        z_L: torch.Tensor,
+        input_embeddings: torch.Tensor,
+        intervention_step: Optional[torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        level_upper = level.upper()
+        if level_upper == "L":
+            hidden_states = self._scale_merge_source(
+                z_L, level="L", source="own", intervention_step=intervention_step
+            )
+            h_source = self._scale_merge_source(
+                z_H, level="L", source="H", intervention_step=intervention_step
+            )
+            input_source = self._scale_merge_source(
+                input_embeddings, level="L", source="input", intervention_step=intervention_step
+            )
+            return hidden_states, h_source + input_source
+        if level_upper == "H":
+            hidden_states = self._scale_merge_source(
+                z_H, level="H", source="own", intervention_step=intervention_step
+            )
+            l_source = self._scale_merge_source(
+                z_L, level="H", source="L", intervention_step=intervention_step
+            )
+            return hidden_states, l_source
+        raise ValueError(f"Unknown reasoning level: {level}")
+
+    def _validate_merge_intervention(self) -> None:
+        level = self.config.merge_intervention_level
+        source = self.config.merge_intervention_source
+        if level is None and source is None:
+            return
+        if level is None or source is None:
+            raise ValueError("merge_intervention_level and merge_intervention_source must be set together")
+        allowed = {"L": {"own", "h", "input"}, "H": {"own", "l"}}
+        level_upper = level.upper()
+        if level_upper not in allowed or source.lower() not in allowed[level_upper]:
+            choices = "L:own, L:H, L:input, H:own, H:L"
+            raise ValueError(f"Invalid merge intervention {level}:{source}; expected one of {choices}")
+
     def forward(
         self,
         carry: HierarchicalReasoningModel_ACTV1InnerCarry,
@@ -298,6 +375,7 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
 
         # Input encoding
         input_embeddings = self._input_embeddings(batch["inputs"], batch["puzzle_identifiers"])
+        self._validate_merge_intervention()
 
         block_traces: Optional[Dict[str, List[Dict[str, object]]]] = None
         if return_block_traces:
@@ -306,13 +384,20 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
         def run_level(
             level: HierarchicalReasoningModel_ACTV1ReasoningModule,
             level_name: str,
-            hidden_states: torch.Tensor,
-            input_injection: torch.Tensor,
+            z_H: torch.Tensor,
+            z_L: torch.Tensor,
             *,
             h_cycle: int,
             l_cycle: Optional[int],
             phase: str,
         ) -> torch.Tensor:
+            hidden_states, input_injection = self._prepare_level_inputs(
+                level=level_name,
+                z_H=z_H,
+                z_L=z_L,
+                input_embeddings=input_embeddings,
+                intervention_step=intervention_step,
+            )
             if block_traces is None:
                 return level(
                     hidden_states,
@@ -350,8 +435,8 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
                         z_L = run_level(
                             self.L_level,
                             "L",
+                            z_H,
                             z_L,
-                            z_H + input_embeddings,
                             h_cycle=_H_step,
                             l_cycle=_L_step,
                             phase="recurrent",
@@ -376,8 +461,8 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
             z_L = run_level(
                 self.L_level,
                 "L",
+                z_H,
                 z_L,
-                z_H + input_embeddings,
                 h_cycle=self.config.H_cycles - 1,
                 l_cycle=self.config.L_cycles - 1,
                 phase="final",
@@ -408,17 +493,31 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
                     }
                 )
         elif return_layer_states:
+            l_hidden, l_injection = self._prepare_level_inputs(
+                level="L",
+                z_H=z_H,
+                z_L=z_L,
+                input_embeddings=input_embeddings,
+                intervention_step=intervention_step,
+            )
             z_L, z_L_inputs, z_L_layers = self.L_level(
-                z_L,
-                z_H + input_embeddings,
+                l_hidden,
+                l_injection,
                 collect=True,
                 collect_inputs=True,
                 intervention_step=intervention_step,
                 **seq_info,
             )
+            h_hidden, h_injection = self._prepare_level_inputs(
+                level="H",
+                z_H=z_H,
+                z_L=z_L,
+                input_embeddings=input_embeddings,
+                intervention_step=intervention_step,
+            )
             z_H, z_H_inputs, z_H_layers = self.H_level(
-                z_H,
-                z_L,
+                h_hidden,
+                h_injection,
                 collect=True,
                 collect_inputs=True,
                 intervention_step=intervention_step,
@@ -431,8 +530,22 @@ class HierarchicalReasoningModel_ACTV1_Inner(nn.Module):
                 "H": [x.detach() for x in z_H_layers],
             }
         else:
-            z_L = self.L_level(z_L, z_H + input_embeddings, intervention_step=intervention_step, **seq_info)
-            z_H = self.H_level(z_H, z_L, intervention_step=intervention_step, **seq_info)
+            l_hidden, l_injection = self._prepare_level_inputs(
+                level="L",
+                z_H=z_H,
+                z_L=z_L,
+                input_embeddings=input_embeddings,
+                intervention_step=intervention_step,
+            )
+            z_L = self.L_level(l_hidden, l_injection, intervention_step=intervention_step, **seq_info)
+            h_hidden, h_injection = self._prepare_level_inputs(
+                level="H",
+                z_H=z_H,
+                z_L=z_L,
+                input_embeddings=input_embeddings,
+                intervention_step=intervention_step,
+            )
+            z_H = self.H_level(h_hidden, h_injection, intervention_step=intervention_step, **seq_info)
 
         if self.config.carry_residual_gated:
             z_H = self._blend_carry(carry.z_H, z_H, self.carry_gate_H)
